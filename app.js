@@ -1,0 +1,207 @@
+const interestDefinitions = [
+  ['history', 'History & heritage'],
+  ['churches', 'Churches & religious sites'],
+  ['nature', 'Nature & scenery'],
+  ['gardens', 'Gardens'],
+  ['architecture', 'Architecture'],
+  ['museums', 'Museums & galleries'],
+  ['coast', 'Beaches & coast'],
+  ['wildlife', 'Wildlife'],
+  ['engineering', 'Engineering & infrastructure'],
+  ['accommodation', 'Notable accommodation']
+];
+
+const interestKeywords = {
+  history: ['historic','heritage','monument','memorial','landmark','fort','ruins','cemetery'],
+  churches: ['church','chapel','cathedral','basilica','temple','mosque','synagogue','religious'],
+  nature: ['national park','reserve','nature','lookout','waterfall','scenic','mountain','forest','headland'],
+  gardens: ['garden','gardens','botanic','botanical','arboretum'],
+  architecture: ['architecture','architectural','tower','bridge','manor'],
+  museums: ['museum','gallery','arts centre','cultural centre','visitor centre'],
+  coast: ['beach','coast','coastal','headland','marina','lighthouse','jetty','pier'],
+  wildlife: ['zoo','aquarium','wildlife','sanctuary','bird','koala'],
+  engineering: ['dam','bridge','railway','railroad','observatory','engineering','infrastructure'],
+  accommodation: ['hotel','resort','lodge','accommodation']
+};
+
+const state = { candidates: [], shortlist: [], activeIndex: 0 };
+const el = id => document.getElementById(id);
+
+function buildInterests() {
+  const host = el('interests');
+  host.innerHTML = interestDefinitions.map(([key, label]) => `
+    <label class="interest-row">
+      <span>${label}</span>
+      <select data-interest="${key}">
+        <option value="off">Off</option>
+        <option value="normal" selected>Normal</option>
+        <option value="high">High</option>
+      </select>
+    </label>`).join('');
+}
+
+function preferences() {
+  return Object.fromEntries([...document.querySelectorAll('[data-interest]')].map(x => [x.dataset.interest, x.value]));
+}
+
+function toRad(v) { return v * Math.PI / 180; }
+function toDeg(v) { return v * 180 / Math.PI; }
+function distanceKm(a, b) {
+  const R = 6371;
+  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
+  const x = Math.sin(dLat/2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng/2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(x));
+}
+function bearing(a, b) {
+  const p1 = toRad(a.lat), p2 = toRad(b.lat), dl = toRad(b.lng-a.lng);
+  return (toDeg(Math.atan2(Math.sin(dl)*Math.cos(p2), Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl))) + 360) % 360;
+}
+function angleDifference(a,b) { return Math.abs(((a-b+540)%360)-180); }
+function compass(diff) {
+  if (diff <= 25) return 'Ahead';
+  if (diff <= 60) return 'Ahead / side';
+  if (diff <= 100) return 'Side';
+  return 'Behind';
+}
+
+function matchInterests(place, prefs) {
+  const haystack = `${place.name} ${place.primaryType || ''} ${(place.types || []).join(' ')}`.toLowerCase().replaceAll('_',' ');
+  const matches = [];
+  for (const [key] of interestDefinitions) {
+    if (prefs[key] === 'off') continue;
+    if (interestKeywords[key].some(k => haystack.includes(k))) matches.push({ key, level: prefs[key] });
+  }
+  return matches;
+}
+
+function qualityScore(place) {
+  let score = 0;
+  if ((place.rating || 0) >= 4.3) score += 2;
+  if ((place.userRatingCount || 0) >= 100) score += 2;
+  if ((place.userRatingCount || 0) >= 1000) score += 2;
+  if (place.photos?.length) score += 1;
+  return score;
+}
+
+function rankCandidates(candidates) {
+  const origin = { lat: Number(el('latitude').value), lng: Number(el('longitude').value) };
+  const heading = Number(el('heading').value);
+  const prefs = preferences();
+
+  state.candidates = candidates.map(place => {
+    const km = distanceKm(origin, place.location);
+    const b = bearing(origin, place.location);
+    const diff = angleDifference(heading, b);
+    const matches = matchInterests(place, prefs);
+    const maxLevel = matches.some(m => m.level === 'high') ? 'high' : matches.length ? 'normal' : 'none';
+    const quality = qualityScore(place);
+    const forward = diff <= 100;
+    const eligible = forward && maxLevel !== 'none';
+    const reason = !forward ? 'Outside forward corridor' : maxLevel === 'none' ? 'No enabled interest match' : `${maxLevel === 'high' ? 'High' : 'Normal'} interest match`;
+    return { ...place, km, bearing: b, directionDiff: diff, direction: compass(diff), matches, maxLevel, quality, eligible, reason };
+  });
+
+  // Relevance chooses the group. Distance orders only after a candidate survives.
+  const eligible = state.candidates.filter(x => x.eligible);
+  const high = eligible.filter(x => x.maxLevel === 'high');
+  const pool = high.length ? high : eligible;
+  state.shortlist = pool
+    .sort((a,b) => (b.quality-a.quality) || (a.km-b.km))
+    .slice(0, 10)
+    .sort((a,b) => a.km-b.km);
+  state.activeIndex = 0;
+  render();
+}
+
+function render() {
+  el('candidate-count').textContent = state.candidates.length;
+  el('shortlist-count').textContent = state.shortlist.length;
+  const active = state.shortlist[state.activeIndex];
+  el('active-distance').textContent = active ? `${active.km.toFixed(1)} km` : '—';
+
+  const card = el('active-card');
+  if (active) {
+    card.classList.remove('empty');
+    el('active-name').textContent = active.name;
+    el('active-meta').textContent = `${active.primaryType || 'Place'} • ${active.km.toFixed(2)} km • ${active.direction}`;
+    el('active-reason').textContent = `Selected because: ${active.reason}. Ranked ${state.activeIndex + 1} of ${state.shortlist.length} by forward distance.`;
+    el('accept').disabled = false;
+    el('reject').disabled = false;
+  } else {
+    card.classList.add('empty');
+    el('active-name').textContent = state.shortlist.length ? 'End of shortlist' : 'No POI selected';
+    el('active-meta').textContent = state.shortlist.length ? 'All shortlisted POIs have been reviewed.' : 'No candidate survived the current filters.';
+    el('active-reason').textContent = '';
+    el('accept').disabled = true;
+    el('reject').disabled = true;
+  }
+
+  const ordered = [...state.candidates].sort((a,b) => {
+    const ai = state.shortlist.findIndex(x => x.id === a.id), bi = state.shortlist.findIndex(x => x.id === b.id);
+    if (ai >= 0 && bi < 0) return -1;
+    if (bi >= 0 && ai < 0) return 1;
+    if (ai >= 0 && bi >= 0) return ai-bi;
+    return a.km-b.km;
+  });
+
+  el('results').innerHTML = ordered.length ? ordered.map(p => {
+    const shortlistIndex = state.shortlist.findIndex(x => x.id === p.id);
+    const isActive = state.shortlist[state.activeIndex]?.id === p.id;
+    const interest = p.matches.length ? p.matches.map(m => interestDefinitions.find(x => x[0] === m.key)[1]).join(', ') : '—';
+    const decision = shortlistIndex >= 0 ? `Shortlist #${shortlistIndex+1}` : p.reason;
+    return `<tr class="${isActive ? 'active-row' : ''}">
+      <td>${shortlistIndex >= 0 ? shortlistIndex+1 : '—'}</td>
+      <td><strong>${escapeHtml(p.name)}</strong><br><small>${escapeHtml(p.address || '')}</small></td>
+      <td>${escapeHtml((p.primaryType || 'unknown').replaceAll('_',' '))}</td>
+      <td><span class="badge ${p.maxLevel === 'high' ? 'high' : ''}">${p.maxLevel}</span><br>${escapeHtml(interest)}</td>
+      <td>${p.quality}</td><td>${p.km.toFixed(2)} km</td><td>${p.direction}<br><small>${Math.round(p.directionDiff)}° off heading</small></td>
+      <td><span class="badge ${shortlistIndex < 0 ? 'reject' : ''}">${escapeHtml(decision)}</span></td>
+    </tr>`;
+  }).join('') : '<tr><td colspan="8" class="empty-cell">No candidates yet.</td></tr>';
+}
+
+function escapeHtml(value='') { return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c])); }
+
+async function searchGoogle() {
+  el('status').textContent = 'Requesting nearby places from Google Places…';
+  el('search').disabled = true;
+  try {
+    const response = await fetch('api/search.php', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({
+      latitude: Number(el('latitude').value), longitude: Number(el('longitude').value), radiusKm: Number(el('radius').value)
+    })});
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+    rankCandidates(data.places || []);
+    el('status').textContent = `Google returned ${data.places?.length || 0} candidates. Selection pipeline complete.`;
+  } catch (err) {
+    el('status').textContent = `Search failed: ${err.message}`;
+  } finally { el('search').disabled = false; }
+}
+
+function loadDemo() {
+  const o = { lat:Number(el('latitude').value), lng:Number(el('longitude').value) };
+  const demo = [
+    ['demo1','Summer Salt Real Estate','real_estate_agency',0.0017,0.0010,4.8,18],
+    ['demo2','St Marys Church','church',0.015,0.020,4.6,83],
+    ['demo3','Regional Museum','museum',0.028,0.035,4.7,241],
+    ['demo4','Warrack Park','park',0.002,0.003,4.1,12],
+    ['demo5','Coastal Lookout','scenic_spot',0.038,0.048,4.8,1300],
+    ['demo6','Botanic Gardens','botanical_garden',-0.020,0.010,4.7,550]
+  ].map(([id,name,primaryType,dlat,dlng,rating,userRatingCount]) => ({id,name,primaryType,types:[primaryType],location:{lat:o.lat+dlat,lng:o.lng+dlng},rating,userRatingCount,address:'Demo candidate',photos: rating > 4.5 ? [{}] : []}));
+  rankCandidates(demo);
+  el('status').textContent = 'Demo candidates loaded. Change interests or heading and reload to test the pipeline.';
+}
+
+el('reject').addEventListener('click', () => { if (state.activeIndex < state.shortlist.length) state.activeIndex++; render(); });
+el('accept').addEventListener('click', () => { const p=state.shortlist[state.activeIndex]; if (p) el('status').textContent = `Accepted: ${p.name}`; });
+el('search').addEventListener('click', searchGoogle);
+el('demo').addEventListener('click', loadDemo);
+el('use-location').addEventListener('click', () => {
+  if (!navigator.geolocation) return el('status').textContent = 'Browser geolocation is not available.';
+  el('status').textContent = 'Getting browser location…';
+  navigator.geolocation.getCurrentPosition(pos => {
+    el('latitude').value = pos.coords.latitude.toFixed(6); el('longitude').value = pos.coords.longitude.toFixed(6); el('status').textContent = 'Current location loaded.';
+  }, err => el('status').textContent = `Location failed: ${err.message}`);
+});
+
+buildInterests();
