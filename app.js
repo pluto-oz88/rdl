@@ -101,7 +101,6 @@ function rankCandidates(candidates) {
     return { ...place, km, bearing: b, directionDiff: diff, direction: compass(diff), matches, maxLevel, quality, eligible, reason };
   });
 
-  // Relevance chooses the group. Distance orders only after a candidate survives.
   const eligible = state.candidates.filter(x => x.eligible);
   const high = eligible.filter(x => x.maxLevel === 'high');
   const pool = high.length ? high : eligible;
@@ -149,6 +148,7 @@ function render() {
     const isActive = state.shortlist[state.activeIndex]?.id === p.id;
     const interest = p.matches.length ? p.matches.map(m => interestDefinitions.find(x => x[0] === m.key)[1]).join(', ') : '—';
     const decision = shortlistIndex >= 0 ? `Shortlist #${shortlistIndex+1}` : p.reason;
+    const infoButton = p.id.startsWith('demo') ? '<button class="small secondary" type="button" disabled>More info</button>' : `<button class="small secondary" type="button" data-more-info="${escapeHtml(p.id)}">More info</button>`;
     return `<tr class="${isActive ? 'active-row' : ''}">
       <td>${shortlistIndex >= 0 ? shortlistIndex+1 : '—'}</td>
       <td><strong>${escapeHtml(p.name)}</strong><br><small>${escapeHtml(p.address || '')}</small></td>
@@ -156,11 +156,62 @@ function render() {
       <td><span class="badge ${p.maxLevel === 'high' ? 'high' : ''}">${p.maxLevel}</span><br>${escapeHtml(interest)}</td>
       <td>${p.quality}</td><td>${p.km.toFixed(2)} km</td><td>${p.direction}<br><small>${Math.round(p.directionDiff)}° off heading</small></td>
       <td><span class="badge ${shortlistIndex < 0 ? 'reject' : ''}">${escapeHtml(decision)}</span></td>
+      <td>${infoButton}</td>
     </tr>`;
-  }).join('') : '<tr><td colspan="8" class="empty-cell">No candidates yet.</td></tr>';
+  }).join('') : '<tr><td colspan="9" class="empty-cell">No candidates yet.</td></tr>';
 }
 
 function escapeHtml(value='') { return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c])); }
+
+function closeDetails() {
+  el('details-modal').hidden = true;
+}
+
+async function showDetails(placeId) {
+  const place = state.candidates.find(p => p.id === placeId);
+  el('details-modal').hidden = false;
+  el('details-name').textContent = place?.name || 'Place details';
+  el('details-type').textContent = place ? (place.primaryType || 'Place').replaceAll('_', ' ') : '';
+  el('details-summary').textContent = '';
+  el('details-grid').innerHTML = '';
+  el('details-hours').innerHTML = '';
+  el('details-links').innerHTML = '';
+  el('details-status').textContent = 'Loading additional Google Places information…';
+
+  try {
+    const response = await fetch(`api/details.php?id=${encodeURIComponent(placeId)}`);
+    const data = await response.json();
+    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+    el('details-name').textContent = data.name || place?.name || 'Place details';
+    el('details-type').textContent = (data.primaryType || 'Place').replaceAll('_', ' ');
+
+    const summaryParts = [];
+    if (data.summary) summaryParts.push(data.summary);
+    if (data.reviewSummary) summaryParts.push(`Visitors often mention: ${data.reviewSummary}`);
+    el('details-summary').textContent = summaryParts.join(' ');
+
+    const facts = [];
+    if (data.address) facts.push(['Address', data.address]);
+    if (data.rating) facts.push(['Google rating', `${Number(data.rating).toFixed(1)} from ${data.userRatingCount || 0} ratings`]);
+    if (data.phone) facts.push(['Phone', data.phone]);
+    if (data.types?.length) facts.push(['Google types', data.types.map(t => t.replaceAll('_',' ')).join(', ')]);
+    if (data.photoCount) facts.push(['Photos', `${data.photoCount} available from Google Places`]);
+    el('details-grid').innerHTML = facts.map(([label, value]) => `<div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`).join('');
+
+    if (data.hours?.length) {
+      el('details-hours').innerHTML = `<h3>Opening hours</h3><ul>${data.hours.map(h => `<li>${escapeHtml(h)}</li>`).join('')}</ul>`;
+    }
+
+    const links = [];
+    if (data.website) links.push(`<a href="${escapeHtml(data.website)}" target="_blank" rel="noopener">Official website</a>`);
+    if (data.googleMapsUri) links.push(`<a href="${escapeHtml(data.googleMapsUri)}" target="_blank" rel="noopener">Open in Google Maps</a>`);
+    el('details-links').innerHTML = links.join('');
+    el('details-status').textContent = summaryParts.length ? 'Live Google Places details loaded.' : 'Google Places details loaded; no editorial summary was available.';
+  } catch (err) {
+    el('details-status').textContent = `Could not load more information: ${err.message}`;
+  }
+}
 
 async function searchGoogle() {
   el('status').textContent = 'Requesting nearby places from Google Places…';
@@ -196,6 +247,12 @@ el('reject').addEventListener('click', () => { if (state.activeIndex < state.sho
 el('accept').addEventListener('click', () => { const p=state.shortlist[state.activeIndex]; if (p) el('status').textContent = `Accepted: ${p.name}`; });
 el('search').addEventListener('click', searchGoogle);
 el('demo').addEventListener('click', loadDemo);
+el('results').addEventListener('click', event => {
+  const button = event.target.closest('[data-more-info]');
+  if (button) showDetails(button.dataset.moreInfo);
+});
+document.querySelectorAll('[data-close-details]').forEach(button => button.addEventListener('click', closeDetails));
+document.addEventListener('keydown', event => { if (event.key === 'Escape' && !el('details-modal').hidden) closeDetails(); });
 el('use-location').addEventListener('click', () => {
   if (!navigator.geolocation) return el('status').textContent = 'Browser geolocation is not available.';
   el('status').textContent = 'Getting browser location…';
