@@ -1,5 +1,7 @@
 <?php
 $version = 'RDL Prototype 1';
+$cssVersion = filemtime(__DIR__ . '/styles.css');
+$jsVersion = filemtime(__DIR__ . '/app.js');
 ?>
 <!doctype html>
 <html lang="en">
@@ -7,7 +9,7 @@ $version = 'RDL Prototype 1';
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>RoadDiscover Laboratory</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="styles.css?v=<?= $cssVersion ?>">
 </head>
 <body>
 <header class="topbar">
@@ -91,6 +93,6 @@ $version = 'RDL Prototype 1';
     </section>
 </div>
 
-<script src="app.js"></script>
+<script src="app.js?v=<?= $jsVersion ?>"></script>
 </body>
 </html>
