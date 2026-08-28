@@ -34,7 +34,35 @@ $jsVersion = filemtime(__DIR__ . '/app.js');
 
         <h2>Interests</h2>
         <p class="hint">High interests determine the shortlist. Distance orders the survivors.</p>
-        <div id="interests" class="interest-list"></div>
+        <div id="interests" class="interest-list">
+            <?php
+            $interestRows = [
+                ['history', 'History & heritage', 'normal'],
+                ['churches', 'Churches & religious sites', 'normal'],
+                ['nature', 'Nature & scenery', 'normal'],
+                ['gardens', 'Gardens', 'normal'],
+                ['architecture', 'Architecture', 'normal'],
+                ['museums', 'Museums & galleries', 'normal'],
+                ['coast', 'Beaches & coast', 'normal'],
+                ['wildlife', 'Wildlife', 'normal'],
+                ['engineering', 'Engineering & infrastructure', 'normal'],
+                ['accommodation', 'Hotels & accommodation', 'off'],
+                ['retail', 'Shops & retail', 'off'],
+                ['food', 'Restaurants & cafes', 'off'],
+                ['business', 'Businesses & services', 'off'],
+            ];
+            foreach ($interestRows as [$key, $label, $defaultLevel]):
+            ?>
+                <label class="interest-row">
+                    <span><?= htmlspecialchars($label) ?></span>
+                    <select data-interest="<?= htmlspecialchars($key) ?>">
+                        <option value="off"<?= $defaultLevel === 'off' ? ' selected' : '' ?>>Off</option>
+                        <option value="normal"<?= $defaultLevel === 'normal' ? ' selected' : '' ?>>Normal</option>
+                        <option value="high"<?= $defaultLevel === 'high' ? ' selected' : '' ?>>High</option>
+                    </select>
+                </label>
+            <?php endforeach; ?>
+        </div>
 
         <div class="actions">
             <button id="search" type="button">Find POIs ahead</button>
