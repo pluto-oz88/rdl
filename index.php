@@ -121,6 +121,14 @@ $jsVersion = filemtime(__DIR__ . '/app.js');
     </section>
 </div>
 
-<script src="app.js?v=<?= $jsVersion ?>"></script>
+<script>
+window.addEventListener('error', function (event) {
+    var status = document.getElementById('status');
+    if (status) {
+        status.textContent = 'JavaScript error: ' + (event.message || 'unknown error') + (event.lineno ? ' (line ' + event.lineno + ')' : '');
+    }
+});
+</script>
+<script src="app.js?v=<?= $jsVersion ?>" onload="document.getElementById('status').textContent='RDL JavaScript loaded. Ready to search.'" onerror="document.getElementById('status').textContent='Could not load app.js.'"></script>
 </body>
 </html>
