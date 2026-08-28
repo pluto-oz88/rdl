@@ -65,16 +65,31 @@ $version = 'RDL Prototype 1';
             <table>
                 <thead>
                 <tr>
-                    <th>#</th><th>Place</th><th>Type</th><th>Interest</th><th>Quality</th><th>Distance</th><th>Direction</th><th>Decision</th>
+                    <th>#</th><th>Place</th><th>Type</th><th>Interest</th><th>Quality</th><th>Distance</th><th>Direction</th><th>Decision</th><th>Info</th>
                 </tr>
                 </thead>
                 <tbody id="results">
-                <tr><td colspan="8" class="empty-cell">No candidates yet.</td></tr>
+                <tr><td colspan="9" class="empty-cell">No candidates yet.</td></tr>
                 </tbody>
             </table>
         </div>
     </section>
 </main>
+
+<div id="details-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-close-details></div>
+    <section class="modal-card" role="dialog" aria-modal="true" aria-labelledby="details-name">
+        <button class="modal-close" type="button" data-close-details aria-label="Close">×</button>
+        <p class="eyebrow">Google Places details</p>
+        <h2 id="details-name">Place details</h2>
+        <p id="details-type" class="details-type"></p>
+        <p id="details-summary" class="details-summary"></p>
+        <div id="details-grid" class="details-grid"></div>
+        <div id="details-hours" class="details-hours"></div>
+        <div id="details-links" class="details-links"></div>
+        <p id="details-status" class="status"></p>
+    </section>
+</div>
 
 <script src="app.js"></script>
 </body>
