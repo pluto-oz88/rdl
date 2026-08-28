@@ -17,12 +17,12 @@ const interestDefinitions = [
 const interestKeywords = {
   history: ['historic','heritage','monument','memorial','landmark','fort','ruins','cemetery'],
   churches: ['church','chapel','cathedral','basilica','temple','mosque','synagogue','religious'],
-  nature: ['national park','reserve','nature','lookout','waterfall','scenic','mountain','forest','headland','park'],
+  nature: ['national park','reserve','nature','lookout','waterfall','scenic','mountain','forest','headland','park','river','lake','woods'],
   gardens: ['garden','gardens','botanic','botanical','arboretum'],
-  architecture: ['architecture','architectural','tower','bridge','manor'],
+  architecture: ['architecture','architectural','tower','bridge','manor','castle','sculpture'],
   museums: ['museum','gallery','arts centre','cultural centre','visitor centre'],
   coast: ['beach','coast','coastal','headland','marina','lighthouse','jetty','pier'],
-  wildlife: ['zoo','aquarium','wildlife','sanctuary','bird','koala'],
+  wildlife: ['zoo','aquarium','wildlife','sanctuary','bird','koala','refuge'],
   engineering: ['dam','bridge','railway','railroad','observatory','engineering','infrastructure'],
   accommodation: ['hotel','resort','lodge','hostel','motel','accommodation','lodging'],
   retail: ['store','shop','shopping','retail','hardware','supermarket','grocery','department store','clothing store','furniture store','home goods store','electronics store','book store','convenience store','liquor store','shopping mall'],
@@ -32,19 +32,6 @@ const interestKeywords = {
 
 const state = { candidates: [], shortlist: [], activeIndex: 0 };
 const el = id => document.getElementById(id);
-
-function buildInterests() {
-  const host = el('interests');
-  host.innerHTML = interestDefinitions.map(([key, label, defaultLevel]) => `
-    <label class="interest-row">
-      <span>${label}</span>
-      <select data-interest="${key}">
-        <option value="off" ${defaultLevel === 'off' ? 'selected' : ''}>Off</option>
-        <option value="normal" ${defaultLevel === 'normal' ? 'selected' : ''}>Normal</option>
-        <option value="high" ${defaultLevel === 'high' ? 'selected' : ''}>High</option>
-      </select>
-    </label>`).join('');
-}
 
 function preferences() {
   return Object.fromEntries([...document.querySelectorAll('[data-interest]')].map(x => [x.dataset.interest, x.value]));
@@ -71,16 +58,12 @@ function compass(diff) {
 }
 
 function matchingCategories(place) {
-  const haystack = `${place.name} ${place.primaryType || ''} ${(place.types || []).join(' ')}`.toLowerCase().replaceAll('_',' ');
-  return interestDefinitions
+  const fromGoogleQuery = Array.isArray(place.queryInterests) ? place.queryInterests : [];
+  const haystack = `${place.name || ''} ${place.primaryType || ''} ${(place.types || []).join(' ')}`.toLowerCase().replaceAll('_',' ');
+  const fromKeywords = interestDefinitions
     .filter(([key]) => interestKeywords[key].some(k => haystack.includes(k)))
     .map(([key]) => key);
-}
-
-function matchInterests(place, prefs) {
-  return matchingCategories(place)
-    .filter(key => prefs[key] !== 'off')
-    .map(key => ({ key, level: prefs[key] }));
+  return [...new Set([...fromGoogleQuery, ...fromKeywords])];
 }
 
 function qualityScore(place) {
@@ -102,30 +85,29 @@ function rankCandidates(candidates) {
     const b = bearing(origin, place.location);
     const diff = angleDifference(heading, b);
     const categories = matchingCategories(place);
-    const blockedCategories = categories.filter(key => prefs[key] === 'off');
-    const matches = matchInterests(place, prefs);
+    const matches = categories.filter(key => prefs[key] && prefs[key] !== 'off').map(key => ({key, level:prefs[key]}));
     const maxLevel = matches.some(m => m.level === 'high') ? 'high' : matches.length ? 'normal' : 'none';
     const quality = qualityScore(place);
     const forward = diff <= 100;
-    const eligible = forward && blockedCategories.length === 0 && maxLevel !== 'none';
-    const blockedLabels = blockedCategories.map(key => interestDefinitions.find(x => x[0] === key)?.[1] || key).join(', ');
-    const reason = !forward
-      ? 'Outside forward corridor'
-      : blockedCategories.length
-        ? `Blocked by Off interest: ${blockedLabels}`
-        : maxLevel === 'none'
-          ? 'No enabled interest match'
-          : `${maxLevel === 'high' ? 'High' : 'Normal'} interest match`;
-    return { ...place, km, bearing: b, directionDiff: diff, direction: compass(diff), categories, blockedCategories, matches, maxLevel, quality, eligible, reason };
+    const eligible = forward && maxLevel !== 'none';
+    const reason = !forward ? 'Outside forward corridor' : maxLevel === 'none' ? 'No enabled interest match' : `${maxLevel === 'high' ? 'High' : 'Normal'} interest match`;
+    return { ...place, km, bearing:b, directionDiff:diff, direction:compass(diff), categories, matches, maxLevel, quality, eligible, reason };
   });
 
   const eligible = state.candidates.filter(x => x.eligible);
-  const high = eligible.filter(x => x.maxLevel === 'high');
-  const pool = high.length ? high : eligible;
-  state.shortlist = pool
-    .sort((a,b) => (b.quality-a.quality) || (a.km-b.km))
-    .slice(0, 10)
-    .sort((a,b) => a.km-b.km);
+  const ranked = [...eligible].sort((a,b) => {
+    const aLevel = a.maxLevel === 'high' ? 0 : 1;
+    const bLevel = b.maxLevel === 'high' ? 0 : 1;
+    return (aLevel - bLevel) || (a.km - b.km) || (b.quality - a.quality);
+  });
+
+  state.shortlist = ranked.slice(0, 10);
+  const shortlistIds = new Set(state.shortlist.map(x => x.id));
+  const eligibleRank = new Map(ranked.map((x,i) => [x.id, i + 1]));
+  state.candidates = state.candidates.map(p => {
+    if (!p.eligible || shortlistIds.has(p.id)) return p;
+    return { ...p, reason: `Eligible ${p.maxLevel} interest match, ranked #${eligibleRank.get(p.id)} of ${ranked.length}; shortlist limited to 10` };
+  });
   state.activeIndex = 0;
   render();
 }
@@ -135,13 +117,13 @@ function render() {
   el('shortlist-count').textContent = state.shortlist.length;
   const active = state.shortlist[state.activeIndex];
   el('active-distance').textContent = active ? `${active.km.toFixed(1)} km` : '—';
-
   const card = el('active-card');
+
   if (active) {
     card.classList.remove('empty');
     el('active-name').textContent = active.name;
     el('active-meta').textContent = `${active.primaryType || 'Place'} • ${active.km.toFixed(2)} km • ${active.direction}`;
-    el('active-reason').textContent = `Selected because: ${active.reason}. Ranked ${state.activeIndex + 1} of ${state.shortlist.length} by forward distance.`;
+    el('active-reason').textContent = `Selected because: ${active.reason}. Shortlist is interest priority first, then forward distance; Google quality only breaks ties.`;
     el('accept').disabled = false;
     el('reject').disabled = false;
   } else {
@@ -164,9 +146,9 @@ function render() {
   el('results').innerHTML = ordered.length ? ordered.map(p => {
     const shortlistIndex = state.shortlist.findIndex(x => x.id === p.id);
     const isActive = state.shortlist[state.activeIndex]?.id === p.id;
-    const interest = p.matches.length ? p.matches.map(m => interestDefinitions.find(x => x[0] === m.key)[1]).join(', ') : '—';
+    const interest = p.matches.length ? p.matches.map(m => interestDefinitions.find(x => x[0] === m.key)?.[1] || m.key).join(', ') : '—';
     const decision = shortlistIndex >= 0 ? `Shortlist #${shortlistIndex+1}` : p.reason;
-    const infoButton = p.id.startsWith('demo') ? '<button class="small secondary" type="button" disabled>More info</button>' : `<button class="small secondary" type="button" data-more-info="${escapeHtml(p.id)}">More info</button>`;
+    const infoButton = String(p.id).startsWith('demo') ? '<button class="small secondary" type="button" disabled>More info</button>' : `<button class="small secondary" type="button" data-more-info="${escapeHtml(p.id)}">More info</button>`;
     return `<tr class="${isActive ? 'active-row' : ''}">
       <td>${shortlistIndex >= 0 ? shortlistIndex+1 : '—'}</td>
       <td><strong>${escapeHtml(p.name)}</strong><br><small>${escapeHtml(p.address || '')}</small></td>
@@ -208,21 +190,27 @@ async function showDetails(placeId) {
     if (data.phone) facts.push(['Phone', data.phone]);
     if (data.types?.length) facts.push(['Google types', data.types.map(t => t.replaceAll('_',' ')).join(', ')]);
     if (data.photoCount) facts.push(['Photos', `${data.photoCount} available from Google Places`]);
-    el('details-grid').innerHTML = facts.map(([label, value]) => `<div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`).join('');
+    el('details-grid').innerHTML = facts.map(([label,value]) => `<div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`).join('');
     if (data.hours?.length) el('details-hours').innerHTML = `<h3>Opening hours</h3><ul>${data.hours.map(h => `<li>${escapeHtml(h)}</li>`).join('')}</ul>`;
     const links = [];
     if (data.website) links.push(`<a href="${escapeHtml(data.website)}" target="_blank" rel="noopener">Official website</a>`);
     if (data.googleMapsUri) links.push(`<a href="${escapeHtml(data.googleMapsUri)}" target="_blank" rel="noopener">Open in Google Maps</a>`);
     el('details-links').innerHTML = links.join('');
     el('details-status').textContent = summaryParts.length ? 'Live Google Places details loaded.' : 'Google Places details loaded; no editorial summary was available.';
-  } catch (err) { el('details-status').textContent = `Could not load more information: ${err.message}`; }
+  } catch (err) {
+    el('details-status').textContent = `Could not load more information: ${err.message}`;
+  }
 }
 
 async function searchGoogle() {
   const prefs = preferences();
   const enabledCount = Object.values(prefs).filter(level => level !== 'off').length;
   if (!enabledCount) {
-    el('status').textContent = 'Turn on at least one interest before searching.';
+    state.candidates = [];
+    state.shortlist = [];
+    state.activeIndex = 0;
+    render();
+    el('status').textContent = 'All interests are Off. Candidates and shortlist cleared.';
     return;
   }
 
@@ -242,9 +230,12 @@ async function searchGoogle() {
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     rankCandidates(data.places || []);
-    el('status').textContent = `Google returned ${data.places?.length || 0} interest-targeted candidates using ${data.queriedTypes?.length || 0} Google place types.`;
-  } catch (err) { el('status').textContent = `Search failed: ${err.message}`; }
-  finally { el('search').disabled = false; }
+    el('status').textContent = `Google returned ${data.places?.length || 0} candidates from ${data.queriedInterests?.length || 0} enabled interests using ${data.queriedTypes?.length || 0} Google place types.`;
+  } catch (err) {
+    el('status').textContent = `Search failed: ${err.message}`;
+  } finally {
+    el('search').disabled = false;
+  }
 }
 
 function loadDemo() {
@@ -259,9 +250,9 @@ function loadDemo() {
     ['demo7','Bunnings Warehouse','hardware_store',0.003,0.006,4.4,1200],
     ['demo8','Beachside Cafe','cafe',0.004,0.008,4.6,650],
     ['demo9','Noosa Resort','hotel',0.005,0.010,4.5,900]
-  ].map(([id,name,primaryType,dlat,dlng,rating,userRatingCount]) => ({id,name,primaryType,types:[primaryType],location:{lat:o.lat+dlat,lng:o.lng+dlng},rating,userRatingCount,address:'Demo candidate',photos: rating > 4.5 ? [{}] : []}));
+  ].map(([id,name,primaryType,dlat,dlng,rating,userRatingCount]) => ({id,name,primaryType,types:[primaryType],location:{lat:o.lat+dlat,lng:o.lng+dlng},rating,userRatingCount,address:'Demo candidate',photos:rating > 4.5 ? [{}] : [],queryInterests:[]}));
   rankCandidates(demo);
-  el('status').textContent = 'Demo candidates loaded. Change interests or heading and reload to test the pipeline.';
+  el('status').textContent = 'Demo candidates loaded.';
 }
 
 el('reject').addEventListener('click', () => { if (state.activeIndex < state.shortlist.length) state.activeIndex++; render(); });
@@ -278,9 +269,23 @@ el('use-location').addEventListener('click', () => {
     el('latitude').value = pos.coords.latitude.toFixed(6);
     el('longitude').value = pos.coords.longitude.toFixed(6);
     el('status').textContent = 'Current location loaded.';
-  }, err => {
-    el('status').textContent = `Location failed: ${err.message}`;
+  }, err => { el('status').textContent = `Location failed: ${err.message}`; });
+});
+
+document.querySelectorAll('[data-interest]').forEach(select => {
+  select.addEventListener('change', () => {
+    const enabled = Object.values(preferences()).some(level => level !== 'off');
+    if (!enabled) {
+      state.candidates = [];
+      state.shortlist = [];
+      state.activeIndex = 0;
+      render();
+      el('status').textContent = 'All interests are Off. Candidates and shortlist cleared.';
+    } else if (state.candidates.length) {
+      rankCandidates(state.candidates);
+      el('status').textContent = 'Filters changed. Existing candidates re-ranked; run Find POIs ahead to refresh Google results.';
+    }
   });
 });
 
-buildInterests();
+render();
