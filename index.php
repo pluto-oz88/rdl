@@ -65,8 +65,8 @@ $jsVersion = filemtime(__DIR__ . '/app.js');
         </div>
 
         <div class="actions">
-            <button id="search" type="button">Find POIs ahead</button>
-            <button id="demo" class="secondary" type="button">Load demo candidates</button>
+            <button id="search" type="button" onclick="event.stopImmediatePropagation(); document.getElementById('status').textContent='Search button clicked — starting Google request…'; searchGoogle();">Find POIs ahead</button>
+            <button id="demo" class="secondary" type="button" onclick="event.stopImmediatePropagation(); loadDemo();">Load demo candidates</button>
         </div>
         <p id="status" class="status">Ready.</p>
     </aside>
@@ -93,14 +93,8 @@ $jsVersion = filemtime(__DIR__ . '/app.js');
 
         <div class="table-wrap">
             <table>
-                <thead>
-                <tr>
-                    <th>#</th><th>Place</th><th>Type</th><th>Interest</th><th>Quality</th><th>Distance</th><th>Direction</th><th>Decision</th><th>Info</th>
-                </tr>
-                </thead>
-                <tbody id="results">
-                <tr><td colspan="9" class="empty-cell">No candidates yet.</td></tr>
-                </tbody>
+                <thead><tr><th>#</th><th>Place</th><th>Type</th><th>Interest</th><th>Quality</th><th>Distance</th><th>Direction</th><th>Decision</th><th>Info</th></tr></thead>
+                <tbody id="results"><tr><td colspan="9" class="empty-cell">No candidates yet.</td></tr></tbody>
             </table>
         </div>
     </section>
@@ -124,9 +118,7 @@ $jsVersion = filemtime(__DIR__ . '/app.js');
 <script>
 window.addEventListener('error', function (event) {
     var status = document.getElementById('status');
-    if (status) {
-        status.textContent = 'JavaScript error: ' + (event.message || 'unknown error') + (event.lineno ? ' (line ' + event.lineno + ')' : '');
-    }
+    if (status) status.textContent = 'JavaScript error: ' + (event.message || 'unknown error') + (event.lineno ? ' (line ' + event.lineno + ')' : '');
 });
 </script>
 <script src="app.js?v=<?= $jsVersion ?>" onload="document.getElementById('status').textContent='RDL JavaScript loaded. Ready to search.'" onerror="document.getElementById('status').textContent='Could not load app.js.'"></script>
