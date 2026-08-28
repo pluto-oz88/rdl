@@ -275,8 +275,12 @@ el('use-location').addEventListener('click', () => {
   if (!navigator.geolocation) return el('status').textContent = 'Browser geolocation is not available.';
   el('status').textContent = 'Getting browser location…';
   navigator.geolocation.getCurrentPosition(pos => {
-    el('latitude').value = pos.coords.latitude.toFixed(6); el('longitude').value = pos.coords.longitude.toFixed(6); el('status').textContent = 'Current location loaded.';
-  }, err => el('status').textContent = `Location failed: ${err.message}`;
+    el('latitude').value = pos.coords.latitude.toFixed(6);
+    el('longitude').value = pos.coords.longitude.toFixed(6);
+    el('status').textContent = 'Current location loaded.';
+  }, err => {
+    el('status').textContent = `Location failed: ${err.message}`;
+  });
 });
 
 buildInterests();
