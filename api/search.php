@@ -7,6 +7,63 @@ function respond(int $status, array $payload): never {
     exit;
 }
 
+function googlePlacesRequest(string $apiKey, array $request): array {
+    $ch = curl_init('https://places.googleapis.com/v1/places:searchNearby');
+    curl_setopt_array($ch, [
+        CURLOPT_POST => true,
+        CURLOPT_RETURNTRANSFER => true,
+        CURLOPT_TIMEOUT => 20,
+        CURLOPT_HTTPHEADER => [
+            'Content-Type: application/json',
+            'X-Goog-Api-Key: ' . $apiKey,
+            'X-Goog-FieldMask: places.id,places.displayName,places.primaryType,places.types,places.location,places.rating,places.userRatingCount,places.formattedAddress,places.photos',
+        ],
+        CURLOPT_POSTFIELDS => json_encode($request),
+    ]);
+
+    $response = curl_exec($ch);
+    if ($response === false) {
+        $error = curl_error($ch);
+        curl_close($ch);
+        respond(502, ['error' => 'Google Places request failed: ' . $error]);
+    }
+
+    $status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    curl_close($ch);
+    $data = json_decode($response, true);
+
+    if ($status < 200 || $status >= 300) {
+        $message = $data['error']['message'] ?? 'Google Places returned HTTP ' . $status;
+        respond(502, ['error' => $message, 'googleStatus' => $status]);
+    }
+
+    return $data['places'] ?? [];
+}
+
+function normalizePlace(array $place): ?array {
+    $location = $place['location'] ?? null;
+    if (!is_array($location) || !isset($location['latitude'], $location['longitude'])) {
+        return null;
+    }
+
+    return [
+        'id' => (string)($place['id'] ?? uniqid('poi-', true)),
+        'name' => (string)($place['displayName']['text'] ?? 'Unnamed place'),
+        'primaryType' => (string)($place['primaryType'] ?? ''),
+        'types' => array_values($place['types'] ?? []),
+        'location' => ['lat' => (float)$location['latitude'], 'lng' => (float)$location['longitude']],
+        'rating' => isset($place['rating']) ? (float)$place['rating'] : null,
+        'userRatingCount' => isset($place['userRatingCount']) ? (int)$place['userRatingCount'] : 0,
+        'address' => (string)($place['formattedAddress'] ?? ''),
+        'photos' => array_map(static fn(array $photo): array => [
+            'name' => $photo['name'] ?? null,
+            'widthPx' => $photo['widthPx'] ?? null,
+            'heightPx' => $photo['heightPx'] ?? null,
+            'authorAttributions' => $photo['authorAttributions'] ?? [],
+        ], array_slice($place['photos'] ?? [], 0, 3)),
+    ];
+}
+
 $body = json_decode(file_get_contents('php://input'), true);
 if (!is_array($body)) {
     respond(400, ['error' => 'Invalid JSON request.']);
@@ -15,6 +72,7 @@ if (!is_array($body)) {
 $lat = filter_var($body['latitude'] ?? null, FILTER_VALIDATE_FLOAT);
 $lng = filter_var($body['longitude'] ?? null, FILTER_VALIDATE_FLOAT);
 $radiusKm = filter_var($body['radiusKm'] ?? 15, FILTER_VALIDATE_FLOAT);
+$interests = is_array($body['interests'] ?? null) ? $body['interests'] : [];
 
 if ($lat === false || $lng === false || $radiusKm === false) {
     respond(400, ['error' => 'Latitude, longitude and radius are required.']);
@@ -37,68 +95,63 @@ if ($apiKey === '') {
     ]);
 }
 
-$request = [
-    'maxResultCount' => 20,
-    'rankPreference' => 'POPULARITY',
-    'locationRestriction' => [
-        'circle' => [
-            'center' => ['latitude' => (float)$lat, 'longitude' => (float)$lng],
-            'radius' => $radiusKm * 1000,
-        ],
-    ],
+$typeMap = [
+    'history' => ['historical_place', 'historical_landmark', 'cultural_landmark', 'monument', 'castle'],
+    'churches' => ['church', 'buddhist_temple', 'hindu_temple', 'mosque', 'shinto_shrine', 'synagogue'],
+    'nature' => ['national_park', 'state_park', 'park', 'hiking_area', 'nature_preserve', 'scenic_spot', 'mountain_peak', 'lake', 'river', 'woods'],
+    'gardens' => ['botanical_garden', 'garden'],
+    'architecture' => ['cultural_landmark', 'historical_landmark', 'castle', 'monument', 'observation_deck'],
+    'museums' => ['museum', 'history_museum', 'art_museum', 'art_gallery', 'cultural_center', 'visitor_center'],
+    'coast' => ['beach', 'marina', 'scenic_spot'],
+    'wildlife' => ['zoo', 'aquarium', 'wildlife_park', 'wildlife_refuge'],
+    'engineering' => ['observation_deck', 'tourist_attraction'],
+    'accommodation' => ['hotel', 'resort_hotel', 'motel', 'hostel', 'lodging', 'guest_house', 'bed_and_breakfast'],
+    'retail' => ['hardware_store', 'shopping_mall', 'department_store', 'store', 'supermarket', 'grocery_store', 'home_improvement_store', 'warehouse_store'],
+    'food' => ['restaurant', 'cafe', 'coffee_shop', 'bakery', 'bar'],
+    'business' => ['corporate_office', 'business_center', 'real_estate_agency', 'travel_agency', 'consultant', 'service'],
 ];
 
-$ch = curl_init('https://places.googleapis.com/v1/places:searchNearby');
-curl_setopt_array($ch, [
-    CURLOPT_POST => true,
-    CURLOPT_RETURNTRANSFER => true,
-    CURLOPT_TIMEOUT => 20,
-    CURLOPT_HTTPHEADER => [
-        'Content-Type: application/json',
-        'X-Goog-Api-Key: ' . $apiKey,
-        'X-Goog-FieldMask: places.id,places.displayName,places.primaryType,places.types,places.location,places.rating,places.userRatingCount,places.formattedAddress,places.photos',
-    ],
-    CURLOPT_POSTFIELDS => json_encode($request),
-]);
-
-$response = curl_exec($ch);
-if ($response === false) {
-    $error = curl_error($ch);
-    curl_close($ch);
-    respond(502, ['error' => 'Google Places request failed: ' . $error]);
-}
-
-$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-curl_close($ch);
-$data = json_decode($response, true);
-
-if ($status < 200 || $status >= 300) {
-    $message = $data['error']['message'] ?? 'Google Places returned HTTP ' . $status;
-    respond(502, ['error' => $message, 'googleStatus' => $status]);
-}
-
-$places = [];
-foreach (($data['places'] ?? []) as $place) {
-    $location = $place['location'] ?? null;
-    if (!is_array($location) || !isset($location['latitude'], $location['longitude'])) {
+$enabledTypes = [];
+foreach ($interests as $key => $level) {
+    if ($level === 'off' || !isset($typeMap[$key])) {
         continue;
     }
-    $places[] = [
-        'id' => (string)($place['id'] ?? uniqid('poi-', true)),
-        'name' => (string)($place['displayName']['text'] ?? 'Unnamed place'),
-        'primaryType' => (string)($place['primaryType'] ?? ''),
-        'types' => array_values($place['types'] ?? []),
-        'location' => ['lat' => (float)$location['latitude'], 'lng' => (float)$location['longitude']],
-        'rating' => isset($place['rating']) ? (float)$place['rating'] : null,
-        'userRatingCount' => isset($place['userRatingCount']) ? (int)$place['userRatingCount'] : 0,
-        'address' => (string)($place['formattedAddress'] ?? ''),
-        'photos' => array_map(static fn(array $photo): array => [
-            'name' => $photo['name'] ?? null,
-            'widthPx' => $photo['widthPx'] ?? null,
-            'heightPx' => $photo['heightPx'] ?? null,
-            'authorAttributions' => $photo['authorAttributions'] ?? [],
-        ], array_slice($place['photos'] ?? [], 0, 3)),
-    ];
+    $enabledTypes = array_merge($enabledTypes, $typeMap[$key]);
+}
+$enabledTypes = array_values(array_unique($enabledTypes));
+
+if (!$enabledTypes) {
+    respond(200, ['places' => [], 'radiusKm' => $radiusKm, 'queriedTypes' => []]);
 }
 
-respond(200, ['places' => $places, 'radiusKm' => $radiusKm]);
+// Nearby Search allows up to 50 included types, so split only if our interest map grows beyond that.
+$typeBatches = array_chunk($enabledTypes, 50);
+$placesById = [];
+
+foreach ($typeBatches as $types) {
+    $request = [
+        'includedTypes' => $types,
+        'maxResultCount' => 20,
+        'rankPreference' => 'POPULARITY',
+        'locationRestriction' => [
+            'circle' => [
+                'center' => ['latitude' => (float)$lat, 'longitude' => (float)$lng],
+                'radius' => $radiusKm * 1000,
+            ],
+        ],
+    ];
+
+    foreach (googlePlacesRequest($apiKey, $request) as $place) {
+        $normalized = normalizePlace($place);
+        if ($normalized === null) {
+            continue;
+        }
+        $placesById[$normalized['id']] = $normalized;
+    }
+}
+
+respond(200, [
+    'places' => array_values($placesById),
+    'radiusKm' => $radiusKm,
+    'queriedTypes' => $enabledTypes,
+]);
