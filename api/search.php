@@ -43,6 +43,7 @@ function googlePlacesRequest(string $apiKey, array $request): array {
 function normalizePlace(array $place): ?array {
     $location = $place['location'] ?? null;
     if (!is_array($location) || !isset($location['latitude'], $location['longitude'])) return null;
+
     return [
         'id' => (string)($place['id'] ?? uniqid('poi-', true)),
         'name' => (string)($place['displayName']['text'] ?? 'Unnamed place'),
@@ -58,6 +59,7 @@ function normalizePlace(array $place): ?array {
             'heightPx' => $photo['heightPx'] ?? null,
             'authorAttributions' => $photo['authorAttributions'] ?? [],
         ], array_slice($place['photos'] ?? [], 0, 3)),
+        'queryInterests' => [],
     ];
 }
 
@@ -79,7 +81,6 @@ if ($apiKey === '' && is_file($localConfig)) {
 }
 if ($apiKey === '') respond(500, ['error' => 'Google Places API key not configured. Create config.local.php from config.example.php or set GOOGLE_PLACES_API_KEY.']);
 
-// Only Google Places Table A types may be sent in includedTypes.
 $typeMap = [
     'history' => ['historical_place', 'historical_landmark', 'cultural_landmark', 'monument', 'castle', 'cemetery'],
     'churches' => ['church', 'buddhist_temple', 'hindu_temple', 'mosque', 'shinto_shrine', 'synagogue'],
@@ -93,24 +94,21 @@ $typeMap = [
     'accommodation' => ['hotel', 'resort_hotel', 'motel', 'hostel', 'lodging', 'guest_house', 'bed_and_breakfast'],
     'retail' => ['hardware_store', 'shopping_mall', 'department_store', 'store', 'supermarket', 'grocery_store', 'home_improvement_store', 'warehouse_store'],
     'food' => ['restaurant', 'cafe', 'coffee_shop', 'bakery', 'bar'],
-    'business' => ['corporate_office', 'business_center', 'real_estate_agency', 'travel_agency', 'consultant', 'service'],
+    'business' => ['corporate_office', 'business_center', 'real_estate_agency', 'travel_agency'],
 ];
 
-$enabledTypes = [];
+$enabledInterests = [];
 foreach ($interests as $key => $level) {
-    if ($level === 'off' || !isset($typeMap[$key])) continue;
-    $enabledTypes = array_merge($enabledTypes, $typeMap[$key]);
+    if ($level !== 'off' && isset($typeMap[$key])) $enabledInterests[$key] = $typeMap[$key];
 }
-$enabledTypes = array_values(array_unique($enabledTypes));
-if (!$enabledTypes) respond(200, ['places' => [], 'radiusKm' => $radiusKm, 'queriedTypes' => []]);
+if (!$enabledInterests) respond(200, ['places' => [], 'radiusKm' => $radiusKm, 'queriedTypes' => [], 'queriedInterests' => []]);
 
-// Search in smaller thematic batches. This prevents a few popular categories from consuming
-// Google's entire 20-result response and gives quieter categories a chance to return places.
-$typeBatches = array_chunk($enabledTypes, 8);
 $placesById = [];
-foreach ($typeBatches as $types) {
+$queriedTypes = [];
+foreach ($enabledInterests as $interestKey => $types) {
+    $queriedTypes = array_merge($queriedTypes, $types);
     $request = [
-        'includedTypes' => $types,
+        'includedTypes' => array_values(array_unique($types)),
         'maxResultCount' => 20,
         'rankPreference' => 'POPULARITY',
         'locationRestriction' => [
@@ -120,15 +118,22 @@ foreach ($typeBatches as $types) {
             ],
         ],
     ];
+
     foreach (googlePlacesRequest($apiKey, $request) as $place) {
         $normalized = normalizePlace($place);
-        if ($normalized !== null) $placesById[$normalized['id']] = $normalized;
+        if ($normalized === null) continue;
+        $id = $normalized['id'];
+        if (!isset($placesById[$id])) $placesById[$id] = $normalized;
+        if (!in_array($interestKey, $placesById[$id]['queryInterests'], true)) {
+            $placesById[$id]['queryInterests'][] = $interestKey;
+        }
     }
 }
 
 respond(200, [
     'places' => array_values($placesById),
     'radiusKm' => $radiusKm,
-    'queriedTypes' => $enabledTypes,
-    'queryBatches' => count($typeBatches),
+    'queriedTypes' => array_values(array_unique($queriedTypes)),
+    'queriedInterests' => array_keys($enabledInterests),
+    'queryBatches' => count($enabledInterests),
 ]);
