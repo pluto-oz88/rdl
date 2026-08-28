@@ -42,10 +42,7 @@ function googlePlacesRequest(string $apiKey, array $request): array {
 
 function normalizePlace(array $place): ?array {
     $location = $place['location'] ?? null;
-    if (!is_array($location) || !isset($location['latitude'], $location['longitude'])) {
-        return null;
-    }
-
+    if (!is_array($location) || !isset($location['latitude'], $location['longitude'])) return null;
     return [
         'id' => (string)($place['id'] ?? uniqid('poi-', true)),
         'name' => (string)($place['displayName']['text'] ?? 'Unnamed place'),
@@ -65,45 +62,33 @@ function normalizePlace(array $place): ?array {
 }
 
 $body = json_decode(file_get_contents('php://input'), true);
-if (!is_array($body)) {
-    respond(400, ['error' => 'Invalid JSON request.']);
-}
+if (!is_array($body)) respond(400, ['error' => 'Invalid JSON request.']);
 
 $lat = filter_var($body['latitude'] ?? null, FILTER_VALIDATE_FLOAT);
 $lng = filter_var($body['longitude'] ?? null, FILTER_VALIDATE_FLOAT);
 $radiusKm = filter_var($body['radiusKm'] ?? 15, FILTER_VALIDATE_FLOAT);
 $interests = is_array($body['interests'] ?? null) ? $body['interests'] : [];
-
-if ($lat === false || $lng === false || $radiusKm === false) {
-    respond(400, ['error' => 'Latitude, longitude and radius are required.']);
-}
-
+if ($lat === false || $lng === false || $radiusKm === false) respond(400, ['error' => 'Latitude, longitude and radius are required.']);
 $radiusKm = max(1, min(50, (float)$radiusKm));
 
 $apiKey = getenv('GOOGLE_PLACES_API_KEY') ?: '';
 $localConfig = dirname(__DIR__) . '/config.local.php';
 if ($apiKey === '' && is_file($localConfig)) {
     $config = require $localConfig;
-    if (is_array($config)) {
-        $apiKey = trim((string)($config['google_places_api_key'] ?? ''));
-    }
+    if (is_array($config)) $apiKey = trim((string)($config['google_places_api_key'] ?? ''));
 }
+if ($apiKey === '') respond(500, ['error' => 'Google Places API key not configured. Create config.local.php from config.example.php or set GOOGLE_PLACES_API_KEY.']);
 
-if ($apiKey === '') {
-    respond(500, [
-        'error' => 'Google Places API key not configured. Create config.local.php from config.example.php or set GOOGLE_PLACES_API_KEY.'
-    ]);
-}
-
+// Only Google Places Table A types may be sent in includedTypes.
 $typeMap = [
-    'history' => ['historical_place', 'historical_landmark', 'cultural_landmark', 'monument', 'castle'],
+    'history' => ['historical_place', 'historical_landmark', 'cultural_landmark', 'monument', 'castle', 'cemetery'],
     'churches' => ['church', 'buddhist_temple', 'hindu_temple', 'mosque', 'shinto_shrine', 'synagogue'],
-    'nature' => ['national_park', 'state_park', 'park', 'hiking_area', 'nature_preserve', 'scenic_spot', 'mountain_peak', 'lake', 'river', 'woods'],
+    'nature' => ['national_park', 'park', 'city_park', 'hiking_area', 'nature_preserve', 'scenic_spot', 'mountain_peak', 'lake', 'river', 'woods'],
     'gardens' => ['botanical_garden', 'garden'],
-    'architecture' => ['cultural_landmark', 'historical_landmark', 'castle', 'monument', 'observation_deck'],
-    'museums' => ['museum', 'history_museum', 'art_museum', 'art_gallery', 'cultural_center', 'visitor_center'],
+    'architecture' => ['cultural_landmark', 'historical_landmark', 'castle', 'monument', 'observation_deck', 'sculpture'],
+    'museums' => ['museum', 'history_museum', 'art_museum', 'art_gallery', 'cultural_center', 'tourist_information_center'],
     'coast' => ['beach', 'marina', 'scenic_spot'],
-    'wildlife' => ['zoo', 'aquarium', 'wildlife_park', 'wildlife_refuge'],
+    'wildlife' => ['zoo', 'aquarium', 'wildlife_park', 'wildlife_refuge', 'nature_preserve'],
     'engineering' => ['observation_deck', 'tourist_attraction'],
     'accommodation' => ['hotel', 'resort_hotel', 'motel', 'hostel', 'lodging', 'guest_house', 'bed_and_breakfast'],
     'retail' => ['hardware_store', 'shopping_mall', 'department_store', 'store', 'supermarket', 'grocery_store', 'home_improvement_store', 'warehouse_store'],
@@ -113,21 +98,16 @@ $typeMap = [
 
 $enabledTypes = [];
 foreach ($interests as $key => $level) {
-    if ($level === 'off' || !isset($typeMap[$key])) {
-        continue;
-    }
+    if ($level === 'off' || !isset($typeMap[$key])) continue;
     $enabledTypes = array_merge($enabledTypes, $typeMap[$key]);
 }
 $enabledTypes = array_values(array_unique($enabledTypes));
+if (!$enabledTypes) respond(200, ['places' => [], 'radiusKm' => $radiusKm, 'queriedTypes' => []]);
 
-if (!$enabledTypes) {
-    respond(200, ['places' => [], 'radiusKm' => $radiusKm, 'queriedTypes' => []]);
-}
-
-// Nearby Search allows up to 50 included types, so split only if our interest map grows beyond that.
-$typeBatches = array_chunk($enabledTypes, 50);
+// Search in smaller thematic batches. This prevents a few popular categories from consuming
+// Google's entire 20-result response and gives quieter categories a chance to return places.
+$typeBatches = array_chunk($enabledTypes, 8);
 $placesById = [];
-
 foreach ($typeBatches as $types) {
     $request = [
         'includedTypes' => $types,
@@ -140,13 +120,9 @@ foreach ($typeBatches as $types) {
             ],
         ],
     ];
-
     foreach (googlePlacesRequest($apiKey, $request) as $place) {
         $normalized = normalizePlace($place);
-        if ($normalized === null) {
-            continue;
-        }
-        $placesById[$normalized['id']] = $normalized;
+        if ($normalized !== null) $placesById[$normalized['id']] = $normalized;
     }
 }
 
@@ -154,4 +130,5 @@ respond(200, [
     'places' => array_values($placesById),
     'radiusKm' => $radiusKm,
     'queriedTypes' => $enabledTypes,
+    'queryBatches' => count($typeBatches),
 ]);
