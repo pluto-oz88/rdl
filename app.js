@@ -180,7 +180,6 @@ function render() {
 }
 
 function escapeHtml(value='') { return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c])); }
-
 function closeDetails() { el('details-modal').hidden = true; }
 
 async function showDetails(placeId) {
@@ -220,14 +219,30 @@ async function showDetails(placeId) {
 }
 
 async function searchGoogle() {
-  el('status').textContent = 'Requesting nearby places from Google Places…';
+  const prefs = preferences();
+  const enabledCount = Object.values(prefs).filter(level => level !== 'off').length;
+  if (!enabledCount) {
+    el('status').textContent = 'Turn on at least one interest before searching.';
+    return;
+  }
+
+  el('status').textContent = `Requesting Google Places for ${enabledCount} enabled interest categories…`;
   el('search').disabled = true;
   try {
-    const response = await fetch('api/search.php', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({ latitude: Number(el('latitude').value), longitude: Number(el('longitude').value), radiusKm: Number(el('radius').value) })});
+    const response = await fetch('api/search.php', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({
+        latitude: Number(el('latitude').value),
+        longitude: Number(el('longitude').value),
+        radiusKm: Number(el('radius').value),
+        interests: prefs
+      })
+    });
     const data = await response.json();
     if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
     rankCandidates(data.places || []);
-    el('status').textContent = `Google returned ${data.places?.length || 0} candidates. Selection pipeline complete.`;
+    el('status').textContent = `Google returned ${data.places?.length || 0} interest-targeted candidates using ${data.queriedTypes?.length || 0} Google place types.`;
   } catch (err) { el('status').textContent = `Search failed: ${err.message}`; }
   finally { el('search').disabled = false; }
 }
@@ -261,7 +276,7 @@ el('use-location').addEventListener('click', () => {
   el('status').textContent = 'Getting browser location…';
   navigator.geolocation.getCurrentPosition(pos => {
     el('latitude').value = pos.coords.latitude.toFixed(6); el('longitude').value = pos.coords.longitude.toFixed(6); el('status').textContent = 'Current location loaded.';
-  }, err => el('status').textContent = `Location failed: ${err.message}`);
+  }, err => el('status').textContent = `Location failed: ${err.message}`;
 });
 
 buildInterests();
