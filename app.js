@@ -1,291 +1,35 @@
 const interestDefinitions = [
-  ['history', 'History & heritage', 'normal'],
-  ['churches', 'Churches & religious sites', 'normal'],
-  ['nature', 'Nature & scenery', 'normal'],
-  ['gardens', 'Gardens', 'normal'],
-  ['architecture', 'Architecture', 'normal'],
-  ['museums', 'Museums & galleries', 'normal'],
-  ['coast', 'Beaches & coast', 'normal'],
-  ['wildlife', 'Wildlife', 'normal'],
-  ['engineering', 'Engineering & infrastructure', 'normal'],
-  ['accommodation', 'Hotels & accommodation', 'off'],
-  ['retail', 'Shops & retail', 'off'],
-  ['food', 'Restaurants & cafes', 'off'],
-  ['business', 'Businesses & services', 'off']
+  ['history','History & heritage'],['churches','Churches & religious sites'],['nature','Nature & scenery'],['gardens','Gardens'],['architecture','Architecture'],['museums','Museums & galleries'],['coast','Beaches & coast'],['wildlife','Wildlife'],['engineering','Engineering & infrastructure'],['accommodation','Hotels & accommodation'],['retail','Shops & retail'],['food','Restaurants & cafes'],['business','Businesses & services']
 ];
-
 const interestKeywords = {
-  history: ['historic','heritage','monument','memorial','landmark','fort','ruins','cemetery'],
-  churches: ['church','chapel','cathedral','basilica','temple','mosque','synagogue','religious'],
-  nature: ['national park','reserve','nature','lookout','waterfall','scenic','mountain','forest','headland','park','river','lake','woods'],
-  gardens: ['garden','gardens','botanic','botanical','arboretum'],
-  architecture: ['architecture','architectural','tower','bridge','manor','castle','sculpture'],
-  museums: ['museum','gallery','arts centre','cultural centre','visitor centre'],
-  coast: ['beach','coast','coastal','headland','marina','lighthouse','jetty','pier'],
-  wildlife: ['zoo','aquarium','wildlife','sanctuary','bird','koala','refuge'],
-  engineering: ['dam','bridge','railway','railroad','observatory','engineering','infrastructure'],
-  accommodation: ['hotel','resort','lodge','hostel','motel','accommodation','lodging'],
-  retail: ['store','shop','shopping','retail','hardware','supermarket','grocery','department store','clothing store','furniture store','home goods store','electronics store','book store','convenience store','liquor store','shopping mall'],
-  food: ['restaurant','cafe','coffee','bakery','bar','pub','meal takeaway','fast food','food'],
-  business: ['real estate','real estate agency','agency','accounting','lawyer','insurance','finance','bank','car dealer','car rental','car repair','travel agency','business','service']
+  history:['historic','heritage','monument','memorial','landmark','fort','ruins','cemetery'], churches:['church','chapel','cathedral','basilica','temple','mosque','synagogue','religious'], nature:['national park','reserve','nature','lookout','waterfall','scenic','mountain','forest','headland','park','river','lake','woods'], gardens:['garden','gardens','botanic','botanical','arboretum'], architecture:['architecture','architectural','tower','bridge','manor','castle','sculpture'], museums:['museum','gallery','arts centre','cultural centre','visitor centre'], coast:['beach','coast','coastal','headland','marina','lighthouse','jetty','pier'], wildlife:['zoo','aquarium','wildlife','sanctuary','bird','koala','refuge'], engineering:['dam','bridge','railway','railroad','observatory','engineering','infrastructure'], accommodation:['hotel','resort','lodge','hostel','motel','accommodation','lodging'], retail:['store','shop','shopping','retail','hardware','supermarket','grocery','department store','clothing store','furniture store','home goods store','electronics store','book store','convenience store','liquor store','shopping mall'], food:['restaurant','cafe','coffee','bakery','bar','pub','meal takeaway','fast food','food'], business:['real estate','real estate agency','agency','accounting','lawyer','insurance','finance','bank','car dealer','car rental','car repair','travel agency','business','service']
 };
-
-const state = { candidates: [], shortlist: [], activeIndex: 0 };
-const el = id => document.getElementById(id);
-
-function preferences() {
-  return Object.fromEntries([...document.querySelectorAll('[data-interest]')].map(x => [x.dataset.interest, x.value]));
+const state={candidates:[],shortlist:[],activeIndex:0,typeFilter:null};
+const el=id=>document.getElementById(id);
+const interestLabel=key=>interestDefinitions.find(x=>x[0]===key)?.[1]||key;
+function preferences(){return Object.fromEntries([...document.querySelectorAll('[data-interest]')].map(x=>[x.dataset.interest,x.value]));}
+function toRad(v){return v*Math.PI/180;} function toDeg(v){return v*180/Math.PI;}
+function distanceKm(a,b){const R=6371,dLat=toRad(b.lat-a.lat),dLng=toRad(b.lng-a.lng),x=Math.sin(dLat/2)**2+Math.cos(toRad(a.lat))*Math.cos(toRad(b.lat))*Math.sin(dLng/2)**2;return 2*R*Math.asin(Math.sqrt(x));}
+function bearing(a,b){const p1=toRad(a.lat),p2=toRad(b.lat),dl=toRad(b.lng-a.lng);return(toDeg(Math.atan2(Math.sin(dl)*Math.cos(p2),Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl)))+360)%360;}
+function angleDifference(a,b){return Math.abs(((a-b+540)%360)-180);} function compass(diff){if(diff<=25)return'Ahead';if(diff<=60)return'Ahead / side';if(diff<=100)return'Side';return'Behind';}
+function matchingCategories(place){const fromGoogle=Array.isArray(place.queryInterests)?place.queryInterests:[];const haystack=`${place.name||''} ${place.primaryType||''} ${(place.types||[]).join(' ')}`.toLowerCase().replaceAll('_',' ');const fromKeywords=interestDefinitions.filter(([key])=>interestKeywords[key].some(k=>haystack.includes(k))).map(([key])=>key);return[...new Set([...fromGoogle,...fromKeywords])];}
+function prominence(place){let score=0;const evidence=[];if((place.rating||0)>=4.3){score+=2;evidence.push('rating ≥4.3 +2');}if((place.userRatingCount||0)>=100){score+=2;evidence.push('100+ ratings +2');}if((place.userRatingCount||0)>=1000){score+=2;evidence.push('1000+ ratings +2');}if(place.photos?.length){score+=1;evidence.push('photos +1');}return{score,evidence:evidence.length?evidence.join('; '):'no prominence signals'};}
+function rankCandidates(candidates){
+  const origin={lat:Number(el('latitude').value),lng:Number(el('longitude').value)},heading=Number(el('heading').value),prefs=preferences();
+  state.candidates=candidates.map(place=>{const km=distanceKm(origin,place.location),b=bearing(origin,place.location),diff=angleDifference(heading,b),categories=matchingCategories(place),matches=categories.filter(key=>prefs[key]&&prefs[key]!=='off').map(key=>({key,level:prefs[key]})),maxLevel=matches.some(m=>m.level==='high')?'high':matches.length?'normal':'none',prom=prominence(place),forward=diff<=100,eligible=forward&&maxLevel!=='none',reason=!forward?'Outside forward corridor':maxLevel==='none'?'No enabled interest match':`${maxLevel==='high'?'High':'Normal'} interest match`;return{...place,km,bearing:b,directionDiff:diff,direction:compass(diff),categories,matches,maxLevel,prominence:prom.score,prominenceEvidence:prom.evidence,eligible,reason};});
+  const eligible=state.candidates.filter(x=>x.eligible),ranked=[...eligible].sort((a,b)=>{const al=a.maxLevel==='high'?0:1,bl=b.maxLevel==='high'?0:1;return(al-bl)||(a.km-b.km)||(b.prominence-a.prominence);});
+  const eligibleRank=new Map(ranked.map((x,i)=>[x.id,i+1])); state.shortlist=ranked.slice(0,10); const shortlistIds=new Set(state.shortlist.map(x=>x.id));
+  state.candidates=state.candidates.map(p=>({...p,eligibleRank:p.eligible?eligibleRank.get(p.id):null,reason:p.eligible&&!shortlistIds.has(p.id)?`Eligible ${p.maxLevel} match; overall eligible rank #${eligibleRank.get(p.id)} of ${ranked.length}; shortlist limited to 10`:p.reason}));state.activeIndex=0;render();
 }
-
-function toRad(v) { return v * Math.PI / 180; }
-function toDeg(v) { return v * 180 / Math.PI; }
-function distanceKm(a, b) {
-  const R = 6371;
-  const dLat = toRad(b.lat - a.lat), dLng = toRad(b.lng - a.lng);
-  const x = Math.sin(dLat/2) ** 2 + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng/2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(x));
+function renderTypeSummary(){const counts=new Map();state.candidates.forEach(p=>(p.types||[]).forEach(t=>counts.set(t,(counts.get(t)||0)+1)));const sorted=[...counts.entries()].sort((a,b)=>b[1]-a[1]||a[0].localeCompare(b[0]));el('type-summary').innerHTML=sorted.length?sorted.map(([type,count])=>`<button type="button" class="type-chip ${state.typeFilter===type?'selected':''}" data-type-filter="${escapeHtml(type)}"><span>${escapeHtml(type.replaceAll('_',' '))}</span><strong>${count}</strong></button>`).join(''):'<span class="empty-note">No Google types in the current candidate set.</span>';el('clear-type-filter').hidden=!state.typeFilter;}
+function render(){
+  el('candidate-count').textContent=state.candidates.length;el('eligible-count').textContent=state.candidates.filter(x=>x.eligible).length;el('shortlist-count').textContent=state.shortlist.length;const active=state.shortlist[state.activeIndex];el('active-distance').textContent=active?`${active.km.toFixed(1)} km`:'—';const card=el('active-card');
+  if(active){card.classList.remove('empty');el('active-name').textContent=active.name;el('active-meta').textContent=`${(active.primaryType||'Place').replaceAll('_',' ')} • ${active.km.toFixed(2)} km • ${active.direction}`;el('active-reason').textContent=`Selected because: ${active.reason}. Eligible rank #${active.eligibleRank}. Interest priority then forward distance; prominence only breaks a distance tie.`;el('accept').disabled=false;el('reject').disabled=false;}else{card.classList.add('empty');el('active-name').textContent=state.shortlist.length?'End of shortlist':'No POI selected';el('active-meta').textContent=state.shortlist.length?'All shortlisted POIs have been reviewed.':'No candidate survived the current filters.';el('active-reason').textContent='';el('accept').disabled=true;el('reject').disabled=true;}
+  renderTypeSummary();let ordered=[...state.candidates].sort((a,b)=>{if(a.eligibleRank&&b.eligibleRank)return a.eligibleRank-b.eligibleRank;if(a.eligibleRank)return-1;if(b.eligibleRank)return 1;return a.km-b.km;});if(state.typeFilter)ordered=ordered.filter(p=>(p.types||[]).includes(state.typeFilter));
+  el('results').innerHTML=ordered.length?ordered.map(p=>{const shortlistIndex=state.shortlist.findIndex(x=>x.id===p.id),isActive=state.shortlist[state.activeIndex]?.id===p.id,interest=p.matches.length?p.matches.map(m=>`${interestLabel(m.key)} (${m.level})`).join(', '):'—',decision=shortlistIndex>=0?`Shortlist #${shortlistIndex+1}; eligible rank #${p.eligibleRank}`:p.reason,allTypes=(p.types||[]).length?p.types.map(t=>t.replaceAll('_',' ')).join(', '):'—',infoButton=String(p.id).startsWith('demo')?'<button class="small secondary" type="button" disabled>More info</button>':`<button class="small secondary" type="button" data-more-info="${escapeHtml(p.id)}">More info</button>`;return`<tr class="${isActive?'active-row':''}"><td>${p.eligibleRank||'—'}</td><td><strong>${escapeHtml(p.name)}</strong><br><small>${escapeHtml(p.address||'')}</small></td><td><strong>${escapeHtml((p.primaryType||'unknown').replaceAll('_',' '))}</strong></td><td class="all-types">${escapeHtml(allTypes)}</td><td><span class="badge ${p.maxLevel==='high'?'high':''}">${p.maxLevel}</span><br>${escapeHtml(interest)}</td><td><strong>${p.prominence}</strong><br><small>${escapeHtml(p.prominenceEvidence)}</small></td><td>${p.km.toFixed(2)} km</td><td>${p.direction}<br><small>${Math.round(p.directionDiff)}° off heading</small></td><td>${escapeHtml(decision)}</td><td>${infoButton}</td></tr>`;}).join(''):'<tr><td colspan="10" class="empty-cell">No candidates match the current view.</td></tr>';
 }
-function bearing(a, b) {
-  const p1 = toRad(a.lat), p2 = toRad(b.lat), dl = toRad(b.lng-a.lng);
-  return (toDeg(Math.atan2(Math.sin(dl)*Math.cos(p2), Math.cos(p1)*Math.sin(p2)-Math.sin(p1)*Math.cos(p2)*Math.cos(dl))) + 360) % 360;
-}
-function angleDifference(a,b) { return Math.abs(((a-b+540)%360)-180); }
-function compass(diff) {
-  if (diff <= 25) return 'Ahead';
-  if (diff <= 60) return 'Ahead / side';
-  if (diff <= 100) return 'Side';
-  return 'Behind';
-}
-
-function matchingCategories(place) {
-  const fromGoogleQuery = Array.isArray(place.queryInterests) ? place.queryInterests : [];
-  const haystack = `${place.name || ''} ${place.primaryType || ''} ${(place.types || []).join(' ')}`.toLowerCase().replaceAll('_',' ');
-  const fromKeywords = interestDefinitions
-    .filter(([key]) => interestKeywords[key].some(k => haystack.includes(k)))
-    .map(([key]) => key);
-  return [...new Set([...fromGoogleQuery, ...fromKeywords])];
-}
-
-function qualityScore(place) {
-  let score = 0;
-  if ((place.rating || 0) >= 4.3) score += 2;
-  if ((place.userRatingCount || 0) >= 100) score += 2;
-  if ((place.userRatingCount || 0) >= 1000) score += 2;
-  if (place.photos?.length) score += 1;
-  return score;
-}
-
-function rankCandidates(candidates) {
-  const origin = { lat: Number(el('latitude').value), lng: Number(el('longitude').value) };
-  const heading = Number(el('heading').value);
-  const prefs = preferences();
-
-  state.candidates = candidates.map(place => {
-    const km = distanceKm(origin, place.location);
-    const b = bearing(origin, place.location);
-    const diff = angleDifference(heading, b);
-    const categories = matchingCategories(place);
-    const matches = categories.filter(key => prefs[key] && prefs[key] !== 'off').map(key => ({key, level:prefs[key]}));
-    const maxLevel = matches.some(m => m.level === 'high') ? 'high' : matches.length ? 'normal' : 'none';
-    const quality = qualityScore(place);
-    const forward = diff <= 100;
-    const eligible = forward && maxLevel !== 'none';
-    const reason = !forward ? 'Outside forward corridor' : maxLevel === 'none' ? 'No enabled interest match' : `${maxLevel === 'high' ? 'High' : 'Normal'} interest match`;
-    return { ...place, km, bearing:b, directionDiff:diff, direction:compass(diff), categories, matches, maxLevel, quality, eligible, reason };
-  });
-
-  const eligible = state.candidates.filter(x => x.eligible);
-  const ranked = [...eligible].sort((a,b) => {
-    const aLevel = a.maxLevel === 'high' ? 0 : 1;
-    const bLevel = b.maxLevel === 'high' ? 0 : 1;
-    return (aLevel - bLevel) || (a.km - b.km) || (b.quality - a.quality);
-  });
-
-  state.shortlist = ranked.slice(0, 10);
-  const shortlistIds = new Set(state.shortlist.map(x => x.id));
-  const eligibleRank = new Map(ranked.map((x,i) => [x.id, i + 1]));
-  state.candidates = state.candidates.map(p => {
-    if (!p.eligible || shortlistIds.has(p.id)) return p;
-    return { ...p, reason: `Eligible ${p.maxLevel} interest match, ranked #${eligibleRank.get(p.id)} of ${ranked.length}; shortlist limited to 10` };
-  });
-  state.activeIndex = 0;
-  render();
-}
-
-function render() {
-  el('candidate-count').textContent = state.candidates.length;
-  el('shortlist-count').textContent = state.shortlist.length;
-  const active = state.shortlist[state.activeIndex];
-  el('active-distance').textContent = active ? `${active.km.toFixed(1)} km` : '—';
-  const card = el('active-card');
-
-  if (active) {
-    card.classList.remove('empty');
-    el('active-name').textContent = active.name;
-    el('active-meta').textContent = `${active.primaryType || 'Place'} • ${active.km.toFixed(2)} km • ${active.direction}`;
-    el('active-reason').textContent = `Selected because: ${active.reason}. Shortlist is interest priority first, then forward distance; Google quality only breaks ties.`;
-    el('accept').disabled = false;
-    el('reject').disabled = false;
-  } else {
-    card.classList.add('empty');
-    el('active-name').textContent = state.shortlist.length ? 'End of shortlist' : 'No POI selected';
-    el('active-meta').textContent = state.shortlist.length ? 'All shortlisted POIs have been reviewed.' : 'No candidate survived the current filters.';
-    el('active-reason').textContent = '';
-    el('accept').disabled = true;
-    el('reject').disabled = true;
-  }
-
-  const ordered = [...state.candidates].sort((a,b) => {
-    const ai = state.shortlist.findIndex(x => x.id === a.id), bi = state.shortlist.findIndex(x => x.id === b.id);
-    if (ai >= 0 && bi < 0) return -1;
-    if (bi >= 0 && ai < 0) return 1;
-    if (ai >= 0 && bi >= 0) return ai-bi;
-    return a.km-b.km;
-  });
-
-  el('results').innerHTML = ordered.length ? ordered.map(p => {
-    const shortlistIndex = state.shortlist.findIndex(x => x.id === p.id);
-    const isActive = state.shortlist[state.activeIndex]?.id === p.id;
-    const interest = p.matches.length ? p.matches.map(m => interestDefinitions.find(x => x[0] === m.key)?.[1] || m.key).join(', ') : '—';
-    const decision = shortlistIndex >= 0 ? `Shortlist #${shortlistIndex+1}` : p.reason;
-    const infoButton = String(p.id).startsWith('demo') ? '<button class="small secondary" type="button" disabled>More info</button>' : `<button class="small secondary" type="button" data-more-info="${escapeHtml(p.id)}">More info</button>`;
-    return `<tr class="${isActive ? 'active-row' : ''}">
-      <td>${shortlistIndex >= 0 ? shortlistIndex+1 : '—'}</td>
-      <td><strong>${escapeHtml(p.name)}</strong><br><small>${escapeHtml(p.address || '')}</small></td>
-      <td>${escapeHtml((p.primaryType || 'unknown').replaceAll('_',' '))}</td>
-      <td><span class="badge ${p.maxLevel === 'high' ? 'high' : ''}">${p.maxLevel}</span><br>${escapeHtml(interest)}</td>
-      <td>${p.quality}</td><td>${p.km.toFixed(2)} km</td><td>${p.direction}<br><small>${Math.round(p.directionDiff)}° off heading</small></td>
-      <td><span class="badge ${shortlistIndex < 0 ? 'reject' : ''}">${escapeHtml(decision)}</span></td>
-      <td>${infoButton}</td>
-    </tr>`;
-  }).join('') : '<tr><td colspan="9" class="empty-cell">No candidates yet.</td></tr>';
-}
-
-function escapeHtml(value='') { return String(value).replace(/[&<>'"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c])); }
-function closeDetails() { el('details-modal').hidden = true; }
-
-async function showDetails(placeId) {
-  const place = state.candidates.find(p => p.id === placeId);
-  el('details-modal').hidden = false;
-  el('details-name').textContent = place?.name || 'Place details';
-  el('details-type').textContent = place ? (place.primaryType || 'Place').replaceAll('_', ' ') : '';
-  el('details-summary').textContent = '';
-  el('details-grid').innerHTML = '';
-  el('details-hours').innerHTML = '';
-  el('details-links').innerHTML = '';
-  el('details-status').textContent = 'Loading additional Google Places information…';
-  try {
-    const response = await fetch(`api/details.php?id=${encodeURIComponent(placeId)}`);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-    el('details-name').textContent = data.name || place?.name || 'Place details';
-    el('details-type').textContent = (data.primaryType || 'Place').replaceAll('_', ' ');
-    const summaryParts = [];
-    if (data.summary) summaryParts.push(data.summary);
-    if (data.reviewSummary) summaryParts.push(`Visitors often mention: ${data.reviewSummary}`);
-    el('details-summary').textContent = summaryParts.join(' ');
-    const facts = [];
-    if (data.address) facts.push(['Address', data.address]);
-    if (data.rating) facts.push(['Google rating', `${Number(data.rating).toFixed(1)} from ${data.userRatingCount || 0} ratings`]);
-    if (data.phone) facts.push(['Phone', data.phone]);
-    if (data.types?.length) facts.push(['Google types', data.types.map(t => t.replaceAll('_',' ')).join(', ')]);
-    if (data.photoCount) facts.push(['Photos', `${data.photoCount} available from Google Places`]);
-    el('details-grid').innerHTML = facts.map(([label,value]) => `<div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`).join('');
-    if (data.hours?.length) el('details-hours').innerHTML = `<h3>Opening hours</h3><ul>${data.hours.map(h => `<li>${escapeHtml(h)}</li>`).join('')}</ul>`;
-    const links = [];
-    if (data.website) links.push(`<a href="${escapeHtml(data.website)}" target="_blank" rel="noopener">Official website</a>`);
-    if (data.googleMapsUri) links.push(`<a href="${escapeHtml(data.googleMapsUri)}" target="_blank" rel="noopener">Open in Google Maps</a>`);
-    el('details-links').innerHTML = links.join('');
-    el('details-status').textContent = summaryParts.length ? 'Live Google Places details loaded.' : 'Google Places details loaded; no editorial summary was available.';
-  } catch (err) {
-    el('details-status').textContent = `Could not load more information: ${err.message}`;
-  }
-}
-
-async function searchGoogle() {
-  const prefs = preferences();
-  const enabledCount = Object.values(prefs).filter(level => level !== 'off').length;
-  if (!enabledCount) {
-    state.candidates = [];
-    state.shortlist = [];
-    state.activeIndex = 0;
-    render();
-    el('status').textContent = 'All interests are Off. Candidates and shortlist cleared.';
-    return;
-  }
-
-  el('status').textContent = `Requesting Google Places for ${enabledCount} enabled interest categories…`;
-  el('search').disabled = true;
-  try {
-    const response = await fetch('api/search.php', {
-      method: 'POST',
-      headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({
-        latitude: Number(el('latitude').value),
-        longitude: Number(el('longitude').value),
-        radiusKm: Number(el('radius').value),
-        interests: prefs
-      })
-    });
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
-    rankCandidates(data.places || []);
-    el('status').textContent = `Google returned ${data.places?.length || 0} candidates from ${data.queriedInterests?.length || 0} enabled interests using ${data.queriedTypes?.length || 0} Google place types.`;
-  } catch (err) {
-    el('status').textContent = `Search failed: ${err.message}`;
-  } finally {
-    el('search').disabled = false;
-  }
-}
-
-function loadDemo() {
-  const o = { lat:Number(el('latitude').value), lng:Number(el('longitude').value) };
-  const demo = [
-    ['demo1','Summer Salt Real Estate','real_estate_agency',0.0017,0.0010,4.8,18],
-    ['demo2','St Marys Church','church',0.015,0.020,4.6,83],
-    ['demo3','Regional Museum','museum',0.028,0.035,4.7,241],
-    ['demo4','Warrack Park','park',0.002,0.003,4.1,12],
-    ['demo5','Coastal Lookout','scenic_spot',0.038,0.048,4.8,1300],
-    ['demo6','Botanic Gardens','botanical_garden',-0.020,0.010,4.7,550],
-    ['demo7','Bunnings Warehouse','hardware_store',0.003,0.006,4.4,1200],
-    ['demo8','Beachside Cafe','cafe',0.004,0.008,4.6,650],
-    ['demo9','Noosa Resort','hotel',0.005,0.010,4.5,900]
-  ].map(([id,name,primaryType,dlat,dlng,rating,userRatingCount]) => ({id,name,primaryType,types:[primaryType],location:{lat:o.lat+dlat,lng:o.lng+dlng},rating,userRatingCount,address:'Demo candidate',photos:rating > 4.5 ? [{}] : [],queryInterests:[]}));
-  rankCandidates(demo);
-  el('status').textContent = 'Demo candidates loaded.';
-}
-
-el('reject').addEventListener('click', () => { if (state.activeIndex < state.shortlist.length) state.activeIndex++; render(); });
-el('accept').addEventListener('click', () => { const p=state.shortlist[state.activeIndex]; if (p) el('status').textContent = `Accepted: ${p.name}`; });
-el('search').addEventListener('click', searchGoogle);
-el('demo').addEventListener('click', loadDemo);
-el('results').addEventListener('click', event => { const button = event.target.closest('[data-more-info]'); if (button) showDetails(button.dataset.moreInfo); });
-document.querySelectorAll('[data-close-details]').forEach(button => button.addEventListener('click', closeDetails));
-document.addEventListener('keydown', event => { if (event.key === 'Escape' && !el('details-modal').hidden) closeDetails(); });
-el('use-location').addEventListener('click', () => {
-  if (!navigator.geolocation) return el('status').textContent = 'Browser geolocation is not available.';
-  el('status').textContent = 'Getting browser location…';
-  navigator.geolocation.getCurrentPosition(pos => {
-    el('latitude').value = pos.coords.latitude.toFixed(6);
-    el('longitude').value = pos.coords.longitude.toFixed(6);
-    el('status').textContent = 'Current location loaded.';
-  }, err => { el('status').textContent = `Location failed: ${err.message}`; });
-});
-
-document.querySelectorAll('[data-interest]').forEach(select => {
-  select.addEventListener('change', () => {
-    const enabled = Object.values(preferences()).some(level => level !== 'off');
-    if (!enabled) {
-      state.candidates = [];
-      state.shortlist = [];
-      state.activeIndex = 0;
-      render();
-      el('status').textContent = 'All interests are Off. Candidates and shortlist cleared.';
-    } else if (state.candidates.length) {
-      rankCandidates(state.candidates);
-      el('status').textContent = 'Filters changed. Existing candidates re-ranked; run Find POIs ahead to refresh Google results.';
-    }
-  });
-});
-
-render();
+function escapeHtml(value=''){return String(value).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#039;','"':'&quot;'}[c]));} function closeDetails(){el('details-modal').hidden=true;}
+async function showDetails(placeId){const place=state.candidates.find(p=>p.id===placeId);el('details-modal').hidden=false;el('details-name').textContent=place?.name||'Place details';el('details-type').textContent=place?(place.primaryType||'Place').replaceAll('_',' '):'';el('details-summary').textContent='';el('details-grid').innerHTML='';el('details-hours').innerHTML='';el('details-links').innerHTML='';el('details-status').textContent='Loading additional Google Places information…';try{const response=await fetch(`api/details.php?id=${encodeURIComponent(placeId)}`),data=await response.json();if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);el('details-name').textContent=data.name||place?.name||'Place details';el('details-type').textContent=(data.primaryType||'Place').replaceAll('_',' ');const summaries=[];if(data.summary)summaries.push(data.summary);if(data.reviewSummary)summaries.push(`Visitors often mention: ${data.reviewSummary}`);el('details-summary').textContent=summaries.join(' ');const facts=[];if(data.address)facts.push(['Address',data.address]);if(data.rating)facts.push(['Google rating',`${Number(data.rating).toFixed(1)} from ${data.userRatingCount||0} ratings`]);if(data.phone)facts.push(['Phone',data.phone]);if(data.types?.length)facts.push(['Google types',data.types.map(t=>t.replaceAll('_',' ')).join(', ')]);if(data.photoCount)facts.push(['Photos',`${data.photoCount} available from Google Places`]);el('details-grid').innerHTML=facts.map(([label,value])=>`<div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(value)}</span></div>`).join('');if(data.hours?.length)el('details-hours').innerHTML=`<h3>Opening hours</h3><ul>${data.hours.map(h=>`<li>${escapeHtml(h)}</li>`).join('')}</ul>`;const links=[];if(data.website)links.push(`<a href="${escapeHtml(data.website)}" target="_blank" rel="noopener">Official website</a>`);if(data.googleMapsUri)links.push(`<a href="${escapeHtml(data.googleMapsUri)}" target="_blank" rel="noopener">Open in Google Maps</a>`);el('details-links').innerHTML=links.join('');el('details-status').textContent=summaries.length?'Live Google Places details loaded.':'Google Places details loaded; no editorial summary was available.';}catch(err){el('details-status').textContent=`Could not load more information: ${err.message}`;}}
+async function searchGoogle(){const prefs=preferences(),enabledCount=Object.values(prefs).filter(level=>level!=='off').length;if(!enabledCount){state.candidates=[];state.shortlist=[];state.activeIndex=0;state.typeFilter=null;render();el('status').textContent='All interests are Off. Candidates and shortlist cleared.';return;}el('status').textContent=`Requesting Google Places for ${enabledCount} enabled interest categories…`;el('search').disabled=true;try{const response=await fetch('api/search.php',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({latitude:Number(el('latitude').value),longitude:Number(el('longitude').value),radiusKm:Number(el('radius').value),interests:prefs})}),data=await response.json();if(!response.ok)throw new Error(data.error||`HTTP ${response.status}`);state.typeFilter=null;rankCandidates(data.places||[]);el('status').textContent=`Google returned ${data.places?.length||0} candidates from ${data.queriedInterests?.length||0} enabled interests using ${data.queriedTypes?.length||0} requested Google place types. Research table shows every returned candidate.`;}catch(err){el('status').textContent=`Search failed: ${err.message}`;}finally{el('search').disabled=false;}}
+function loadDemo(){const o={lat:Number(el('latitude').value),lng:Number(el('longitude').value)};const demo=[['demo1','Summer Salt Real Estate','real_estate_agency',['real_estate_agency','point_of_interest'],.0017,.0010,4.8,18],['demo2','St Marys Church','church',['church','place_of_worship','point_of_interest'],.015,.020,4.6,83],['demo3','Regional Museum','museum',['museum','tourist_attraction','point_of_interest'],.028,.035,4.7,241],['demo4','Warrack Park','park',['park','point_of_interest'],.002,.003,4.1,12],['demo5','Coastal Lookout','scenic_spot',['scenic_spot','tourist_attraction','point_of_interest'],.038,.048,4.8,1300],['demo6','Botanic Gardens','botanical_garden',['botanical_garden','park','point_of_interest'],-.020,.010,4.7,550],['demo7','Bunnings Warehouse','hardware_store',['hardware_store','store','point_of_interest'],.003,.006,4.4,1200],['demo8','Beachside Cafe','cafe',['cafe','restaurant','food'],.004,.008,4.6,650],['demo9','Noosa Resort','hotel',['hotel','lodging','point_of_interest'],.005,.010,4.5,900]].map(([id,name,primaryType,types,dlat,dlng,rating,userRatingCount])=>({id,name,primaryType,types,location:{lat:o.lat+dlat,lng:o.lng+dlng},rating,userRatingCount,address:'Demo candidate',photos:rating>4.5?[{}]:[],queryInterests:[]}));state.typeFilter=null;rankCandidates(demo);el('status').textContent='Demo candidates loaded in Research Mode.';}
+el('reject').addEventListener('click',()=>{if(state.activeIndex<state.shortlist.length)state.activeIndex++;render();});el('accept').addEventListener('click',()=>{const p=state.shortlist[state.activeIndex];if(p)el('status').textContent=`Accepted: ${p.name}`;});el('search').addEventListener('click',searchGoogle);el('demo').addEventListener('click',loadDemo);el('results').addEventListener('click',event=>{const button=event.target.closest('[data-more-info]');if(button)showDetails(button.dataset.moreInfo);});el('type-summary').addEventListener('click',event=>{const button=event.target.closest('[data-type-filter]');if(button){state.typeFilter=button.dataset.typeFilter;render();}});el('clear-type-filter').addEventListener('click',()=>{state.typeFilter=null;render();});document.querySelectorAll('[data-close-details]').forEach(button=>button.addEventListener('click',closeDetails));document.addEventListener('keydown',event=>{if(event.key==='Escape'&&!el('details-modal').hidden)closeDetails();});el('use-location').addEventListener('click',()=>{if(!navigator.geolocation)return el('status').textContent='Browser geolocation is not available.';el('status').textContent='Getting browser location…';navigator.geolocation.getCurrentPosition(pos=>{el('latitude').value=pos.coords.latitude.toFixed(6);el('longitude').value=pos.coords.longitude.toFixed(6);el('status').textContent='Current location loaded.';},err=>{el('status').textContent=`Location failed: ${err.message}`;});});document.querySelectorAll('[data-interest]').forEach(select=>select.addEventListener('change',()=>{const enabled=Object.values(preferences()).some(level=>level!=='off');if(!enabled){state.candidates=[];state.shortlist=[];state.activeIndex=0;state.typeFilter=null;render();el('status').textContent='All interests are Off. Candidates and shortlist cleared.';}else if(state.candidates.length){rankCandidates(state.candidates);el('status').textContent='Filters changed. Existing candidates re-ranked; run Find POIs ahead to refresh Google results.';}}));render();
