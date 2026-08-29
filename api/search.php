@@ -7,6 +7,28 @@ function respond(int $status, array $payload): never {
     exit;
 }
 
+function destinationPoint(float $lat, float $lng, float $bearingDeg, float $distanceKm): array {
+    $earthRadiusKm = 6371.0;
+    $angularDistance = $distanceKm / $earthRadiusKm;
+    $bearing = deg2rad($bearingDeg);
+    $lat1 = deg2rad($lat);
+    $lng1 = deg2rad($lng);
+
+    $lat2 = asin(
+        sin($lat1) * cos($angularDistance) +
+        cos($lat1) * sin($angularDistance) * cos($bearing)
+    );
+    $lng2 = $lng1 + atan2(
+        sin($bearing) * sin($angularDistance) * cos($lat1),
+        cos($angularDistance) - sin($lat1) * sin($lat2)
+    );
+
+    return [
+        'lat' => rad2deg($lat2),
+        'lng' => rad2deg($lng2),
+    ];
+}
+
 function googlePlacesRequest(string $apiKey, array $request): array {
     $ch = curl_init('https://places.googleapis.com/v1/places:searchNearby');
     curl_setopt_array($ch, [
@@ -68,10 +90,17 @@ if (!is_array($body)) respond(400, ['error' => 'Invalid JSON request.']);
 
 $lat = filter_var($body['latitude'] ?? null, FILTER_VALIDATE_FLOAT);
 $lng = filter_var($body['longitude'] ?? null, FILTER_VALIDATE_FLOAT);
-$radiusKm = filter_var($body['radiusKm'] ?? 15, FILTER_VALIDATE_FLOAT);
+$heading = filter_var($body['heading'] ?? null, FILTER_VALIDATE_FLOAT);
+$searchAheadKm = filter_var($body['searchAheadKm'] ?? ($body['radiusKm'] ?? 15), FILTER_VALIDATE_FLOAT);
 $interests = is_array($body['interests'] ?? null) ? $body['interests'] : [];
-if ($lat === false || $lng === false || $radiusKm === false) respond(400, ['error' => 'Latitude, longitude and radius are required.']);
-$radiusKm = max(1, min(50, (float)$radiusKm));
+if ($lat === false || $lng === false || $heading === false || $searchAheadKm === false) {
+    respond(400, ['error' => 'Latitude, longitude, heading and search-ahead distance are required.']);
+}
+
+$searchAheadKm = max(1, min(50, (float)$searchAheadKm));
+$heading = fmod(((float)$heading + 360.0), 360.0);
+$googleRadiusKm = $searchAheadKm / 2.0;
+$searchCenter = destinationPoint((float)$lat, (float)$lng, $heading, $googleRadiusKm);
 
 $apiKey = getenv('GOOGLE_PLACES_API_KEY') ?: '';
 $localConfig = dirname(__DIR__) . '/config.local.php';
@@ -101,7 +130,16 @@ $enabledInterests = [];
 foreach ($interests as $key => $level) {
     if ($level !== 'off' && isset($typeMap[$key])) $enabledInterests[$key] = $typeMap[$key];
 }
-if (!$enabledInterests) respond(200, ['places' => [], 'radiusKm' => $radiusKm, 'queriedTypes' => [], 'queriedInterests' => []]);
+if (!$enabledInterests) {
+    respond(200, [
+        'places' => [],
+        'searchAheadKm' => $searchAheadKm,
+        'googleRadiusKm' => $googleRadiusKm,
+        'searchCenter' => $searchCenter,
+        'queriedTypes' => [],
+        'queriedInterests' => [],
+    ]);
+}
 
 $placesById = [];
 $queriedTypes = [];
@@ -113,8 +151,11 @@ foreach ($enabledInterests as $interestKey => $types) {
         'rankPreference' => 'POPULARITY',
         'locationRestriction' => [
             'circle' => [
-                'center' => ['latitude' => (float)$lat, 'longitude' => (float)$lng],
-                'radius' => $radiusKm * 1000,
+                'center' => [
+                    'latitude' => $searchCenter['lat'],
+                    'longitude' => $searchCenter['lng'],
+                ],
+                'radius' => $googleRadiusKm * 1000,
             ],
         ],
     ];
@@ -132,7 +173,10 @@ foreach ($enabledInterests as $interestKey => $types) {
 
 respond(200, [
     'places' => array_values($placesById),
-    'radiusKm' => $radiusKm,
+    'searchAheadKm' => $searchAheadKm,
+    'googleRadiusKm' => $googleRadiusKm,
+    'searchCenter' => $searchCenter,
+    'heading' => $heading,
     'queriedTypes' => array_values(array_unique($queriedTypes)),
     'queriedInterests' => array_keys($enabledInterests),
     'queryBatches' => count($enabledInterests),
