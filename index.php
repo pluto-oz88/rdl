@@ -88,5 +88,51 @@ $jsVersion = filemtime(__DIR__ . '/app.js');
 </div>
 <script>window.addEventListener('error',function(event){var status=document.getElementById('status');if(status)status.textContent='JavaScript error: '+(event.message||'unknown error')+(event.lineno?' (line '+event.lineno+')':'');});</script>
 <script src="app.js?v=<?= $jsVersion ?>" onerror="document.getElementById('status').textContent='Could not load app.js.'"></script>
+<script>
+(function () {
+    const button = document.getElementById('use-location');
+    const status = document.getElementById('status');
+    const latitude = document.getElementById('latitude');
+    const longitude = document.getElementById('longitude');
+
+    if (!button) return;
+
+    button.addEventListener('click', function () {
+        status.textContent = 'Getting current location…';
+
+        if (!window.isSecureContext) {
+            status.textContent = 'Location unavailable: this page is not running in a secure HTTPS context.';
+            return;
+        }
+
+        if (!navigator.geolocation) {
+            status.textContent = 'Location unavailable: this browser does not support geolocation.';
+            return;
+        }
+
+        navigator.geolocation.getCurrentPosition(
+            function (position) {
+                latitude.value = position.coords.latitude.toFixed(6);
+                longitude.value = position.coords.longitude.toFixed(6);
+                const accuracy = Math.round(position.coords.accuracy);
+                status.textContent = `Current location loaded: ${latitude.value}, ${longitude.value} (accuracy about ${accuracy} m).`;
+            },
+            function (error) {
+                const messages = {
+                    1: 'permission denied',
+                    2: 'position unavailable',
+                    3: 'request timed out'
+                };
+                status.textContent = `Could not get current location: ${messages[error.code] || error.message || 'unknown geolocation error'}.`;
+            },
+            {
+                enableHighAccuracy: true,
+                timeout: 15000,
+                maximumAge: 0
+            }
+        );
+    });
+})();
+</script>
 </body>
 </html>
