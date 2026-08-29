@@ -23,8 +23,9 @@ $jsVersion = filemtime(__DIR__ . '/app.js');
             <label>Latitude<input id="latitude" type="number" step="0.000001" value="-26.3911"></label>
             <label>Longitude<input id="longitude" type="number" step="0.000001" value="153.0317"></label>
             <label>Heading °<input id="heading" type="number" min="0" max="359" value="90"></label>
-            <label>Search radius km<input id="radius" type="number" min="1" max="50" value="15"></label>
+            <label>Search ahead km<input id="radius" type="number" min="1" max="50" value="15"></label>
         </div>
+        <p class="hint">Google searches a circle centred halfway ahead. For 15 km ahead, the circle is centred 7.5 km forward with a 7.5 km radius.</p>
         <button id="use-location" class="secondary" type="button">Use my current location</button>
         <h2>Interests</h2>
         <p class="hint">High interests rank ahead of Normal. Within each level, forward distance ranks candidates. Prominence is research evidence, not a quality judgement.</p>
