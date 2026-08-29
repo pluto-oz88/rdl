@@ -28,6 +28,7 @@ $jsVersion = filemtime(__DIR__ . '/app.js');
         <button id="use-location" class="secondary" type="button">Use my current location</button>
         <h2>Interests</h2>
         <p class="hint">High interests rank ahead of Normal. Within each level, forward distance ranks candidates. Prominence is research evidence, not a quality judgement.</p>
+        <button id="all-interests-off" class="secondary" type="button">Turn all interests Off</button>
         <div id="interests" class="interest-list">
         <?php
         $interestRows = [
