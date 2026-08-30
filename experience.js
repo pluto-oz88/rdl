@@ -1,8 +1,11 @@
 (() => {
   const q = id => document.getElementById(id);
+  const SPEECH_GAP_MS = 1200;
   let activeId = null;
   let detailsCache = new Map();
   let detailsRequest = 0;
+  let speechTimer = null;
+  let lastSpeechEndAt = 0;
 
   function activePoi() { return state.shortlist[state.activeIndex] || null; }
   function humanType(value='place') { return String(value || 'place').replaceAll('_',' '); }
@@ -16,11 +19,32 @@
     const category = p.matches?.length ? interestLabel(p.matches[0].key).toLowerCase() : humanType(p.primaryType);
     return `Coming up ${sideText(p)} in about ${distanceText(p.km)} is ${p.name}, a ${category} place.`;
   }
-  function stopSpeech() { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); }
+  function stopSpeech() {
+    if (speechTimer) clearTimeout(speechTimer);
+    speechTimer = null;
+    if ('speechSynthesis' in window && (window.speechSynthesis.speaking || window.speechSynthesis.pending)) {
+      window.speechSynthesis.cancel();
+      lastSpeechEndAt = Date.now();
+    }
+  }
   function speak(text) {
     if (!text || !('speechSynthesis' in window)) return;
-    stopSpeech();
-    const u = new SpeechSynthesisUtterance(text); u.rate = .95; window.speechSynthesis.speak(u);
+    if (speechTimer) clearTimeout(speechTimer);
+    speechTimer = null;
+    if (window.speechSynthesis.speaking || window.speechSynthesis.pending) {
+      window.speechSynthesis.cancel();
+      lastSpeechEndAt = Date.now();
+    }
+    const elapsed = lastSpeechEndAt ? Date.now() - lastSpeechEndAt : SPEECH_GAP_MS;
+    const wait = Math.max(0, SPEECH_GAP_MS - elapsed);
+    speechTimer = setTimeout(() => {
+      speechTimer = null;
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = .95;
+      u.onend = () => { lastSpeechEndAt = Date.now(); };
+      u.onerror = () => { lastSpeechEndAt = Date.now(); };
+      window.speechSynthesis.speak(u);
+    }, wait);
   }
 
   async function fetchDetails(id) {
@@ -45,7 +69,12 @@
   refreshDiscovery();
 
   q('speak-discovery').addEventListener('click',()=>{const p=activePoi(); if(p)speak(announcement(p));});
-  q('discovery-next').addEventListener('click',()=>{stopSpeech();q('reject').click();});
+  q('discovery-next').addEventListener('click',()=>{
+    stopSpeech();
+    q('reject').click();
+    const p=activePoi();
+    if(p && q('speak-pois')?.checked) speak(announcement(p));
+  });
   q('reject').addEventListener('click',stopSpeech);
   q('close-more').addEventListener('click',()=>{q('tell-more-card').hidden=true;});
   q('speak-more').addEventListener('click',()=>speak(q('tell-more-text').textContent));
