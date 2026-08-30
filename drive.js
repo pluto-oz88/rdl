@@ -3,16 +3,20 @@
   const SEARCH_AFTER_KM = 0.5;
   const SEARCH_AFTER_MS = 90 * 1000;
   const HEADING_MIN_KM = 0.025;
+  const RELAY_POLL_MS = 2000;
+  const RELAY_STALE_MS = 15000;
 
   const drive = {
     watchId: null,
+    relayTimer: null,
     running: false,
     previousPosition: null,
     searchPosition: null,
     lastSearchAt: 0,
     searchRunning: false,
     headingReady: false,
-    lastAnnouncedId: null
+    lastAnnouncedId: null,
+    relayTimestamp: null
   };
 
   function rad(v) { return v * Math.PI / 180; }
@@ -94,7 +98,7 @@
 
   function maybeSearch(current) {
     if (!drive.headingReady) {
-      setDriveStatus('Location tracking is live. Move about 25 m so RDL can establish direction of travel.');
+      setDriveStatus('GPS is live. Move about 25 m so RDL can establish direction of travel.');
       return;
     }
 
@@ -129,6 +133,7 @@
     if (Number.isFinite(gpsHeading) && gpsHeading >= 0 && (!Number.isFinite(gpsSpeed) || gpsSpeed > 1.5)) {
       q('heading').value = Math.round(gpsHeading);
       drive.headingReady = true;
+      drive.previousPosition = current;
     } else if (drive.previousPosition) {
       const moved = kmBetween(drive.previousPosition, current);
       if (moved >= HEADING_MIN_KM) {
@@ -153,15 +158,65 @@
     setDriveStatus(messages[error.code] || `Location error: ${error.message || 'unknown error'}`);
   }
 
+  async function pollRelay() {
+    if (!drive.running || q('gps-source').value !== 'iphone') return;
+    const session = q('gps-session').value.trim().toLowerCase();
+    if (!/^[a-z0-9_-]{3,32}$/.test(session)) {
+      setDriveStatus('GPS session code must be 3–32 letters, numbers, dashes or underscores.');
+      return;
+    }
+
+    try {
+      const response = await fetch(`api/gps.php?session=${encodeURIComponent(session)}&_=${Date.now()}`, {cache:'no-store'});
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+
+      const age = Date.now() - Number(data.timestamp || 0);
+      if (!Number.isFinite(age) || age > RELAY_STALE_MS) {
+        setDriveStatus('Waiting for a fresh iPhone GPS update. Keep the GPS page open on the phone.');
+        setIndicator('Waiting for iPhone', true);
+        return;
+      }
+
+      if (drive.relayTimestamp === data.timestamp) return;
+      drive.relayTimestamp = data.timestamp;
+
+      onPosition({
+        coords: {
+          latitude: Number(data.latitude),
+          longitude: Number(data.longitude),
+          accuracy: data.accuracy === null ? null : Number(data.accuracy),
+          speed: data.speed === null ? null : Number(data.speed),
+          heading: data.heading === null ? null : Number(data.heading)
+        },
+        timestamp: Number(data.timestamp)
+      });
+      setIndicator('iPhone GPS live', true);
+    } catch (error) {
+      setIndicator('Waiting for iPhone', true);
+      setDriveStatus(`Waiting for iPhone GPS: ${error.message}`);
+    }
+  }
+
   function startDrive() {
     if (drive.running) return;
     if (!window.isSecureContext) {
       setDriveStatus('Drive Mode requires HTTPS (or localhost).');
       return;
     }
-    if (!navigator.geolocation) {
+
+    const source = q('gps-source').value;
+    if (source === 'laptop' && !navigator.geolocation) {
       setDriveStatus('This browser does not support geolocation.');
       return;
+    }
+
+    if (source === 'iphone') {
+      const session = q('gps-session').value.trim().toLowerCase();
+      if (!/^[a-z0-9_-]{3,32}$/.test(session)) {
+        setDriveStatus('GPS session code must be 3–32 letters, numbers, dashes or underscores.');
+        return;
+      }
     }
 
     drive.running = true;
@@ -170,31 +225,52 @@
     drive.lastSearchAt = 0;
     drive.headingReady = false;
     drive.lastAnnouncedId = null;
+    drive.relayTimestamp = null;
     q('start-drive').disabled = true;
     q('stop-drive').disabled = false;
-    setIndicator('Starting', true);
-    setDriveStatus('Starting continuous location tracking…');
+    q('gps-source').disabled = true;
+    q('gps-session').disabled = true;
 
+    if (source === 'iphone') {
+      setIndicator('Waiting for iPhone', true);
+      setDriveStatus('Connecting to the iPhone GPS relay…');
+      pollRelay();
+      drive.relayTimer = window.setInterval(pollRelay, RELAY_POLL_MS);
+      return;
+    }
+
+    setIndicator('Starting', true);
+    setDriveStatus('Starting laptop location tracking…');
     drive.watchId = navigator.geolocation.watchPosition(
       onPosition,
       onPositionError,
-      { enableHighAccuracy: true, timeout: 15000, maximumAge: 2000 }
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 2000 }
     );
   }
 
   function stopDrive() {
     if (drive.watchId !== null) navigator.geolocation.clearWatch(drive.watchId);
+    if (drive.relayTimer !== null) window.clearInterval(drive.relayTimer);
     drive.watchId = null;
+    drive.relayTimer = null;
     drive.running = false;
     drive.searchRunning = false;
     q('start-drive').disabled = false;
     q('stop-drive').disabled = true;
+    q('gps-source').disabled = false;
+    q('gps-session').disabled = false;
     setIndicator('Stopped', false);
     setDriveStatus('Drive Mode stopped.');
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
   }
 
+  function updateSourceUi() {
+    q('gps-session-row').hidden = q('gps-source').value !== 'iphone';
+  }
+
   q('start-drive').addEventListener('click', startDrive);
   q('stop-drive').addEventListener('click', stopDrive);
+  q('gps-source').addEventListener('change', updateSourceUi);
   window.addEventListener('beforeunload', stopDrive);
+  updateSourceUi();
 })();
