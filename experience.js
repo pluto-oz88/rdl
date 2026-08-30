@@ -16,9 +16,10 @@
     const category = p.matches?.length ? interestLabel(p.matches[0].key).toLowerCase() : humanType(p.primaryType);
     return `Coming up ${sideText(p)} in about ${distanceText(p.km)} is ${p.name}, a ${category} place.`;
   }
+  function stopSpeech() { if ('speechSynthesis' in window) window.speechSynthesis.cancel(); }
   function speak(text) {
     if (!text || !('speechSynthesis' in window)) return;
-    window.speechSynthesis.cancel();
+    stopSpeech();
     const u = new SpeechSynthesisUtterance(text); u.rate = .95; window.speechSynthesis.speak(u);
   }
 
@@ -44,7 +45,8 @@
   refreshDiscovery();
 
   q('speak-discovery').addEventListener('click',()=>{const p=activePoi(); if(p)speak(announcement(p));});
-  q('discovery-next').addEventListener('click',()=>q('reject').click());
+  q('discovery-next').addEventListener('click',()=>{stopSpeech();q('reject').click();});
+  q('reject').addEventListener('click',stopSpeech);
   q('close-more').addEventListener('click',()=>{q('tell-more-card').hidden=true;});
   q('speak-more').addEventListener('click',()=>speak(q('tell-more-text').textContent));
 
@@ -63,5 +65,5 @@
     finally { q('tell-more').disabled=false; }
   });
 
-  window.roadDiscoverExperience={announcement,speak,refreshDiscovery};
+  window.roadDiscoverExperience={announcement,speak,stopSpeech,refreshDiscovery};
 })();
