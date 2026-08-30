@@ -34,7 +34,17 @@ $driveVersion = file_exists(__DIR__ . '/drive.js') ? filemtime(__DIR__ . '/drive
                 <div><p class="eyebrow">Road test</p><h2 id="drive-heading">Drive Mode</h2></div>
                 <span id="drive-indicator" class="drive-indicator">Stopped</span>
             </div>
-            <p class="hint">Tracks the laptop location, calculates direction of travel and refreshes POIs automatically.</p>
+            <p class="hint">For road testing, use the iPhone GPS relay and keep RDL running on the laptop.</p>
+            <label>GPS source
+                <select id="gps-source">
+                    <option value="iphone" selected>iPhone GPS relay</option>
+                    <option value="laptop">This laptop</option>
+                </select>
+            </label>
+            <label id="gps-session-row">GPS session code
+                <input id="gps-session" value="roadtest" maxlength="32" autocomplete="off">
+            </label>
+            <p class="hint">On the iPhone open <strong>/rdl/gps/</strong>, use the same session code, then tap Start GPS.</p>
             <div class="drive-actions">
                 <button id="start-drive" type="button">Start Drive</button>
                 <button id="stop-drive" class="danger" type="button" disabled>Stop</button>
