@@ -1,7 +1,8 @@
 <?php
-$version = 'RDL Prototype 2 — Research Mode';
+$version = 'RDL Prototype 3 — Drive Mode';
 $cssVersion = filemtime(__DIR__ . '/styles.css');
 $jsVersion = filemtime(__DIR__ . '/app.js');
+$driveVersion = file_exists(__DIR__ . '/drive.js') ? filemtime(__DIR__ . '/drive.js') : time();
 ?>
 <!doctype html>
 <html lang="en">
@@ -27,6 +28,27 @@ $jsVersion = filemtime(__DIR__ . '/app.js');
         </div>
         <p class="hint">Google searches a circle centred halfway ahead. For 15 km ahead, the circle is centred 7.5 km forward with a 7.5 km radius.</p>
         <button id="use-location" class="secondary" type="button">Use my current location</button>
+
+        <section class="drive-box" aria-labelledby="drive-heading">
+            <div class="drive-title-row">
+                <div><p class="eyebrow">Road test</p><h2 id="drive-heading">Drive Mode</h2></div>
+                <span id="drive-indicator" class="drive-indicator">Stopped</span>
+            </div>
+            <p class="hint">Tracks the laptop location, calculates direction of travel and refreshes POIs automatically.</p>
+            <div class="drive-actions">
+                <button id="start-drive" type="button">Start Drive</button>
+                <button id="stop-drive" class="danger" type="button" disabled>Stop</button>
+            </div>
+            <label class="drive-option"><input id="speak-pois" type="checkbox" checked><span>Speak new active POIs</span></label>
+            <div class="drive-readouts">
+                <div><span>Speed</span><strong id="drive-speed">—</strong></div>
+                <div><span>GPS accuracy</span><strong id="drive-accuracy">—</strong></div>
+                <div><span>Travel heading</span><strong id="drive-heading-value">—</strong></div>
+                <div><span>Since search</span><strong id="drive-distance">—</strong></div>
+            </div>
+            <p id="drive-status" class="drive-status">Ready for a road test.</p>
+        </section>
+
         <h2>Interests</h2>
         <p class="hint">High interests rank ahead of Normal. Within each level, forward distance ranks candidates. Prominence is research evidence, not a quality judgement.</p>
         <button id="all-interests-off" class="secondary" type="button">Turn all interests Off</button>
@@ -88,51 +110,6 @@ $jsVersion = filemtime(__DIR__ . '/app.js');
 </div>
 <script>window.addEventListener('error',function(event){var status=document.getElementById('status');if(status)status.textContent='JavaScript error: '+(event.message||'unknown error')+(event.lineno?' (line '+event.lineno+')':'');});</script>
 <script src="app.js?v=<?= $jsVersion ?>" onerror="document.getElementById('status').textContent='Could not load app.js.'"></script>
-<script>
-(function () {
-    const button = document.getElementById('use-location');
-    const status = document.getElementById('status');
-    const latitude = document.getElementById('latitude');
-    const longitude = document.getElementById('longitude');
-
-    if (!button) return;
-
-    button.addEventListener('click', function () {
-        status.textContent = 'Getting current location…';
-
-        if (!window.isSecureContext) {
-            status.textContent = 'Location unavailable: this page is not running in a secure HTTPS context.';
-            return;
-        }
-
-        if (!navigator.geolocation) {
-            status.textContent = 'Location unavailable: this browser does not support geolocation.';
-            return;
-        }
-
-        navigator.geolocation.getCurrentPosition(
-            function (position) {
-                latitude.value = position.coords.latitude.toFixed(6);
-                longitude.value = position.coords.longitude.toFixed(6);
-                const accuracy = Math.round(position.coords.accuracy);
-                status.textContent = `Current location loaded: ${latitude.value}, ${longitude.value} (accuracy about ${accuracy} m).`;
-            },
-            function (error) {
-                const messages = {
-                    1: 'permission denied',
-                    2: 'position unavailable',
-                    3: 'request timed out'
-                };
-                status.textContent = `Could not get current location: ${messages[error.code] || error.message || 'unknown geolocation error'}.`;
-            },
-            {
-                enableHighAccuracy: true,
-                timeout: 15000,
-                maximumAge: 0
-            }
-        );
-    });
-})();
-</script>
+<script src="drive.js?v=<?= $driveVersion ?>" onerror="document.getElementById('drive-status').textContent='Could not load drive.js.'"></script>
 </body>
 </html>
