@@ -1,3 +1,4 @@
 config.local.php
 .env
 .DS_Store
+data/gps-*.json
